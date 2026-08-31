@@ -12,3 +12,9 @@ build/
 *.egg-info/
 ~$*
 .idea/
+plans/
+docs/
+CHATGPT_PROJECT_WORKFLOW.docx
+CURRENT_STAGE.md
+PROJECT_GUIDE.md
+PROJECT_OVERVIEW.md
