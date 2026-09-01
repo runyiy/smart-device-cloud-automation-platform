@@ -4,6 +4,9 @@ from functools import lru_cache
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+DEFAULT_SETTINGS_FILE = ".env"
+TEST_SETTINGS_FILE = ".env.test"
+
 
 class Environment(StrEnum):
     """Runtime environments supported by V0."""
@@ -16,7 +19,7 @@ class Settings(BaseSettings):
     """Environment-backed settings shared by later V0 tasks."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=DEFAULT_SETTINGS_FILE,
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -29,5 +32,5 @@ class Settings(BaseSettings):
 
 
 @lru_cache
-def get_settings() -> Settings:
-    return Settings()
+def get_settings(env_file: str = DEFAULT_SETTINGS_FILE) -> Settings:
+    return Settings(_env_file=env_file)

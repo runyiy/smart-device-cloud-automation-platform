@@ -1,4 +1,4 @@
-"""V0-T1 acceptance-test skeleton for typed configuration."""
+"""Acceptance tests for typed application configuration."""
 
 from collections.abc import Iterator
 from pathlib import Path
@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from app.core.config import Environment, Settings, get_settings
+from app.core.config import TEST_SETTINGS_FILE, Environment, get_settings
 
 
 @pytest.fixture(autouse=True)
@@ -31,7 +31,7 @@ def test_settings_loads_required_values_from_environment(
     )
     monkeypatch.setenv("ENVIRONMENT", "development")
 
-    settings = get_settings()
+    settings = get_settings(TEST_SETTINGS_FILE)
 
     assert (
         settings.database_url.get_secret_value()
@@ -48,7 +48,7 @@ def test_settings_rejects_a_missing_database_url(
     monkeypatch.delenv("DATABASE_URL", raising=False)
 
     with pytest.raises(ValidationError):
-        Settings()
+        get_settings(TEST_SETTINGS_FILE)
 
 
 def test_test_environment_can_be_selected_explicitly(
@@ -62,7 +62,7 @@ def test_test_environment_can_be_selected_explicitly(
     )
     monkeypatch.setenv("ENVIRONMENT", "test")
 
-    settings = get_settings()
+    settings = get_settings(TEST_SETTINGS_FILE)
 
     assert settings.environment is Environment.TEST
 
@@ -77,7 +77,7 @@ def test_settings_rejects_invalid_environment(
     monkeypatch.setenv("ENVIRONMENT", "production")
 
     with pytest.raises(ValidationError):
-        get_settings()
+        get_settings(TEST_SETTINGS_FILE)
 
 
 def test_get_settings_returns_cached_instance(
@@ -88,8 +88,8 @@ def test_get_settings_returns_cached_instance(
         "postgresql://user:password@localhost:5432/cache_db",
     )
 
-    first = get_settings()
-    second = get_settings()
+    first = get_settings(TEST_SETTINGS_FILE)
+    second = get_settings(TEST_SETTINGS_FILE)
 
     assert second is first
 
@@ -102,18 +102,18 @@ def test_get_settings_reloads_after_cache_clear(
 
     monkeypatch.setenv("DATABASE_URL", first_url)
 
-    first = get_settings()
+    first = get_settings(TEST_SETTINGS_FILE)
 
     monkeypatch.setenv("DATABASE_URL", second_url)
 
-    cached = get_settings()
+    cached = get_settings(TEST_SETTINGS_FILE)
 
     assert cached is first
     assert cached.database_url.get_secret_value() == first_url
 
     get_settings.cache_clear()
 
-    reloaded = get_settings()
+    reloaded = get_settings(TEST_SETTINGS_FILE)
 
     assert reloaded is not first
     assert reloaded.database_url.get_secret_value() == second_url
@@ -128,7 +128,7 @@ def test_database_url_is_redacted_from_settings_representation(
 
     monkeypatch.setenv("DATABASE_URL", database_url)
 
-    settings = get_settings()
+    settings = get_settings(TEST_SETTINGS_FILE)
 
     assert database_url not in str(settings)
     assert database_url not in repr(settings)
