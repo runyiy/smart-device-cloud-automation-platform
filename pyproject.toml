@@ -18,6 +18,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    # Starlette 1.6 TestClient uses an alias deprecated by AnyIO 4.15.
+    # Revisit when TestClient supports that release with warnings-as-errors.
+    "anyio>=4.14.2,<4.15",
     "httpx2>=2.0,<3.0",
     "mypy>=1.13,<2.0",
     "pytest>=8.3,<9.0",
