@@ -1,4 +1,4 @@
-"""PostgreSQL integration tests for the Alembic migration baseline."""
+"""Opt-in PostgreSQL acceptance for the V0 baseline and V1 Device migration."""
 
 import os
 from collections.abc import Iterator
@@ -30,8 +30,13 @@ def validate_test_database(settings: Settings) -> str:
     if parsed_url.host not in {"localhost", "127.0.0.1"}:
         raise RuntimeError("migration tests require a localhost database")
 
-    if parsed_url.database is None or not parsed_url.database.endswith("_test"):
-        raise RuntimeError("migration database name must end with _test")
+    if parsed_url.database != "smart_device_cloud_test":
+        raise RuntimeError("migration tests require smart_device_cloud_test")
+
+    if parsed_url.drivername != "postgresql+psycopg" or parsed_url.query:
+        raise RuntimeError(
+            "migration tests require psycopg without URL query overrides"
+        )
 
     return database_url
 
@@ -39,10 +44,21 @@ def validate_test_database(settings: Settings) -> str:
 def reset_test_database(settings: Settings) -> str:
     """Reset a validated disposable database to an empty public schema."""
     database_url = validate_test_database(settings)
-    engine = create_engine(database_url)
+    engine = create_engine(database_url, connect_args={"connect_timeout": 5})
 
     try:
         with engine.begin() as connection:
+            assert connection.scalar(text("SELECT current_database()")) == (
+                "smart_device_cloud_test"
+            )
+            other_sessions = connection.scalar(
+                text(
+                    "SELECT count(*) FROM pg_stat_activity "
+                    "WHERE datname = current_database() AND pid <> pg_backend_pid()"
+                )
+            )
+            if other_sessions != 0:
+                raise RuntimeError("migration tests require exclusive database access")
             connection.execute(text("DROP SCHEMA public CASCADE"))
             connection.execute(text("CREATE SCHEMA public"))
     finally:
@@ -120,7 +136,22 @@ def test_database_reset_requires_explicit_opt_in(
             Environment.TEST,
             "postgresql+psycopg://smart_device_user:unit-test-only@localhost/"
             "smart_device_cloud",
-            "must end with _test",
+            "require smart_device_cloud_test",
+        ),
+        (
+            Environment.TEST,
+            "postgresql+psycopg://localhost/other_test",
+            "require smart_device_cloud_test",
+        ),
+        (
+            Environment.TEST,
+            "postgresql+psycopg://localhost/smart_device_cloud_test?host=remote",
+            "without URL query overrides",
+        ),
+        (
+            Environment.TEST,
+            "postgresql://localhost/smart_device_cloud_test",
+            "require psycopg",
         ),
     ],
 )
@@ -141,10 +172,15 @@ def test_database_reset_rejects_unsafe_targets(
 def test_migrations_upgrade_empty_database_to_head(
     migration_settings: Settings,
 ) -> None:
-    """An empty PostgreSQL database should migrate to the table-free baseline."""
+    """Preserve the V0 baseline, then upgrade it to the Device head."""
     database_url = reset_test_database(migration_settings)
     alembic_config = Config("alembic.ini")
 
+    command.upgrade(alembic_config, "0001_v0_baseline")
+    assert read_database_state(database_url) == (
+        "0001_v0_baseline",
+        {"alembic_version"},
+    )
     command.upgrade(alembic_config, "head")
 
     script = ScriptDirectory.from_config(alembic_config)
@@ -152,19 +188,29 @@ def test_migrations_upgrade_empty_database_to_head(
     current_revision, table_names = read_database_state(database_url)
 
     assert current_revision == expected_head
-    assert table_names == {"alembic_version"}
+    assert table_names == {"alembic_version", "devices"}
 
 
 def test_latest_migration_downgrades_and_upgrades_again(
     migration_settings: Settings,
 ) -> None:
-    """The baseline should downgrade to base and upgrade again without extra tables."""
+    """Undo only Device first, then also verify the complete base/head round trip."""
     database_url = reset_test_database(migration_settings)
     alembic_config = Config("alembic.ini")
     script = ScriptDirectory.from_config(alembic_config)
     expected_head = script.get_current_head()
 
     command.upgrade(alembic_config, "head")
+    command.downgrade(alembic_config, "0001_v0_baseline")
+    assert read_database_state(database_url) == (
+        "0001_v0_baseline",
+        {"alembic_version"},
+    )
+    command.upgrade(alembic_config, "head")
+    assert read_database_state(database_url) == (
+        expected_head,
+        {"alembic_version", "devices"},
+    )
     command.downgrade(alembic_config, "base")
 
     current_revision, table_names = read_database_state(database_url)
@@ -177,4 +223,4 @@ def test_latest_migration_downgrades_and_upgrades_again(
     current_revision, table_names = read_database_state(database_url)
 
     assert current_revision == expected_head
-    assert table_names == {"alembic_version"}
+    assert table_names == {"alembic_version", "devices"}

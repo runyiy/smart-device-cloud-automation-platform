@@ -1,6 +1,6 @@
 # Smart Device Cloud & Automation Platform
 
-- 用于练习 Python 后端开发的模块化单体项目，目前处于 V0 基础设施阶段。
+- 用于练习 Python 后端开发的模块化单体项目；V0 已完成，V1-T1 已增加 Device 持久化模型与迁移，尚无设备业务 API。
 - 已实现：FastAPI 应用工厂、配置管理、SQLAlchemy Session 边界、Alembic 基线迁移、健康检查、请求 ID、统一错误响应和 JSON 请求日志。
 - 尚不包含设备业务、用户认证、CRUD、自动化规则、消息队列或前端。
 - 分工：学习者负责功能代码；助手负责 README、操作说明以及 pytest 的编写、维护和验证。
@@ -83,7 +83,7 @@ python -m alembic heads
 python -m alembic history
 ```
 
-- 当前唯一 head 为 `0001_v0_baseline`；基线没有业务表，升级只建立 Alembic 版本记录。
+- 当前唯一 head 为 `f4502b63c0be`，新增 `devices` 表；其前驱 `0001_v0_baseline` 是无业务表的 V0 基线。
 - 以下第一条读取开发数据库版本，第二条会修改 `.env` 指向的开发数据库。先确认该文件指向已有的 `smart_device_cloud`；这里只允许正常升级，不要对开发数据库执行重置或降级：
 
 ```bash
@@ -151,14 +151,14 @@ python -m mypy
 python -m pip check
 ```
 
-- 默认跳过两个真实 PostgreSQL 迁移测试和一个只读 PostgreSQL smoke；日志与 Docs/OpenAPI 验收默认执行，不再保留骨架跳过。
+- 默认跳过两个真实 PostgreSQL 迁移测试、四个 Device 数据库验收测试和一个只读 PostgreSQL smoke，共七项；日志、Docs/OpenAPI 及 Device metadata 检查默认执行。
 - 以下单独启用只读检查：从 `.env.test` 读取配置，要求 test 环境、本机地址、精确库名 `smart_device_cloud_test`、psycopg 驱动及无 URL 查询参数；连接强制只读并设置超时，不重置 schema：
 
 ```bash
 env -u RUN_MIGRATION_TESTS RUN_POSTGRES_SMOKE=1 python -m pytest -q -W error tests/integration/test_v0_smoke.py
 ```
 - 下面是单独的、破坏性的迁移验收入口：只授权删除并重建本机 `smart_device_cloud_test.public`，其中所有对象和数据会丢失。不要并发运行服务、其他迁移或使用该测试库的测试。
-- 现有测试的内部保护只检查本机地址、test 环境和数据库名的 `_test` 后缀；后缀不足以证明授权。因此以下入口额外检查精确库名后才启动测试，不要绕过此检查或把开关永久导出。
+- 迁移和 Device 验收共用保护：要求本机地址、test 环境、精确库名 `smart_device_cloud_test`、psycopg 驱动及无 URL 查询参数；重置前核对实际库名并拒绝其他已连接会话。请确保独占测试库运行，不使用并行测试，也不要把开关永久导出。
 - 确认测试数据可丢弃后，再执行以下命令；它不会操作开发数据库：
 
 ```bash
@@ -186,8 +186,8 @@ environment = dict(os.environ, RUN_MIGRATION_TESTS="1", SETTINGS_FILE=".env.test
 subprocess.run(
     [
         sys.executable, "-m", "pytest", "-q", "-W", "error",
-        "tests/integration/test_migrations.py::test_migrations_upgrade_empty_database_to_head",
-        "tests/integration/test_migrations.py::test_latest_migration_downgrades_and_upgrades_again",
+        "tests/integration/test_migrations.py",
+        "tests/integration/test_devices.py",
     ],
     env=environment,
     check=True,
@@ -200,7 +200,7 @@ subprocess.run(
 PY
 ```
 
-- 执行期间不要修改 `.env.test`。预期为两个测试通过；测试包含空库升级和完整升降级往返，并断言最终版本等于仓库唯一 head。当前最终版本应为 `0001_v0_baseline`。
+- 执行期间不要修改 `.env.test`。上述两个文件目前预期为 14 passed，覆盖目标保护、空库升级、head → V0 baseline → head、完整 base/head 往返，以及 Device 默认值、约束、时区、schema 一致性和并发唯一冲突。最终版本应为唯一 head `f4502b63c0be`，测试创建的 Device 行会清理。
 - 测试失败时先保留错误并检查目标库和版本状态，不要对其他数据库进行重置补救。
 
 ## 8. 常见问题与证据边界
@@ -211,7 +211,12 @@ PY
 - `/health` 正常而 `/ready` 为 503：检查 PostgreSQL 服务、连接地址、账号、库名和权限；应用启动成功不意味着数据库连接已经成功。
 - 迁移版本不匹配：比较正确目标的 `alembic current` 与仓库 `heads/history`；不要使用 `stamp` 或删除 schema 来掩盖未知差异。
 - 默认迁移测试跳过：这是安全设计，不是数据库验证通过的证据；真实验证必须使用上面的独立入口。
-- 验证记录：
+- V1-T1 验证记录（2026-09-23）：
+  - 安全回归 111 passed、7 skipped；单独启用迁移与 Device 验收为 14 passed。
+  - 在独占授权测试库上同时启用数据库验收与只读 smoke，完整回归为 118 passed，无跳过。
+  - Ruff lint/format、严格 mypy（33 个文件）、pip check 均通过；数据库与仓库最终 head 均为 f4502b63c0be。
+  - 只重建 smart_device_cloud_test.public；其他数据库未操作。未修改应用模型或迁移实现。
+- V0 历史验证记录：
   - 2026-09-18（本地日期）：Ubuntu/WSL、Python 3.12.3；使用全新临时 venv，禁用 pip 下载缓存，从项目 dev 依赖重新安装。
   - 首次复演发现 AnyIO 4.15 与 Starlette 1.6 的严格警告兼容问题；获得授权后增加上述 dev 约束，再新建 venv 重做安装，而非复用失败环境。
   - 第二次启动复演：UTC 2026-09-19 01:56:58 至 01:58:37.455，约 99.5 秒。包含环境创建、安装、配置加载、测试库升级、Uvicorn 启动、六个 HTTP 检查和优雅退出，也包含操作间隔。

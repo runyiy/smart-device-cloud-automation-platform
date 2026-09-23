@@ -8,14 +8,15 @@ from sqlalchemy.pool import NullPool
 
 from alembic import context
 from app.core.config import DEFAULT_SETTINGS_FILE, get_settings
-from app.db.base import Base
+from app.devices.model import Device
 
 config = context.config
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-target_metadata = Base.metadata
+# Importing Device registers its table; this is the shared Base metadata.
+target_metadata = Device.metadata
 
 
 def get_database_url() -> str:
