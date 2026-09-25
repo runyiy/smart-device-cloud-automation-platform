@@ -1,31 +1,32 @@
 # Smart Device Cloud & Automation Platform
 
-- 用于练习 Python 后端开发的模块化单体项目；V0 已完成，V1-T1 已增加 Device 持久化模型与迁移，尚无设备业务 API。
-- 已实现：FastAPI 应用工厂、配置管理、SQLAlchemy Session 边界、Alembic 基线迁移、健康检查、请求 ID、统一错误响应和 JSON 请求日志。
-- 尚不包含设备业务、用户认证、CRUD、自动化规则、消息队列或前端。
-- 分工：学习者负责功能代码；助手负责 README、操作说明以及 pytest 的编写、维护和验证。
+- A modular monolith for practicing Python backend development. V0 is complete; V1-T1 adds the Device persistence model and migration, but no device business API yet.
+- Implemented: FastAPI application factory, configuration, SQLAlchemy Session boundaries, Alembic migrations, health checks, request IDs, unified errors, and JSON request logs.
+- Device business workflows, authentication, CRUD APIs, automation rules, message queues, and a frontend are not implemented yet.
+- Responsibilities: the learner implements functionality; the assistant owns README, operating instructions, and pytest implementation, maintenance, and verification.
+- Documentation is written in English. README functional updates are consolidated at the end of each major stage, starting with V1; individual Task progress belongs in CURRENT_STAGE.md. This translation is a user-requested exception to that schedule.
 
-## 1. 前置条件
+## 1. Prerequisites
 
-- 以下命令使用 Ubuntu / WSL 的 Bash，并从仓库根目录执行。
-- 准备 Python 3.12（不支持 3.13）、对应的 venv 模块、Git、curl，以及可用的 PostgreSQL 服务。
-- PostgreSQL 需事先准备两个数据库和登录账号：
-  - 开发：`smart_device_cloud`，账号具有连接和迁移所需的 schema 权限。
-  - 测试：`smart_device_cloud_test`，仅存放可丢弃测试数据；破坏性迁移测试还需删除、重建其 `public` 的权限。
-  - 当前项目使用已经建立的数据库，不要重新创建数据库，也不要使用 `music_ai_db` 或其他数据库。
-- 新机器的 PostgreSQL 安装、账号和数据库创建属于前置准备；本指南不会自动执行这些管理操作。
-- “15 分钟启动”目标从上述条件和仓库就绪后开始，包含虚拟环境、依赖安装、配置、迁移、启动和接口验证；不包含操作系统、Python 和 PostgreSQL 安装。实际复演范围与计时见末尾验证记录。
+- Run the following commands in Ubuntu / WSL Bash from the repository root.
+- Install Python 3.12 (not 3.13), its venv support, Git, and curl, and have a running PostgreSQL service.
+- Provision the two databases and login credentials beforehand:
+  - Development: `smart_device_cloud`, with connection and schema privileges needed for migrations.
+  - Test: `smart_device_cloud_test`, containing disposable test data only. Destructive migration acceptance also requires permission to drop and recreate its `public` schema.
+  - This project uses the existing databases. Do not recreate them or use `music_ai_db` or another database.
+- On a new machine, PostgreSQL installation and account/database provisioning are prerequisites. This guide does not perform those administrative operations automatically.
+- The 15-minute startup target begins after prerequisites and checkout are ready. It includes virtual environment creation, dependency installation, configuration, migration, startup, and HTTP checks, but excludes OS, Python, and PostgreSQL installation. See the evidence section for actual rehearsal scope and timing.
 
-## 2. 安装
+## 2. Installation
 
-- 尚未下载仓库时执行；已有本地仓库则直接进入原目录：
+- Clone only if you do not already have the repository; otherwise enter the existing checkout:
 
 ```bash
 git clone https://github.com/runyiy/smart-device-cloud-automation-platform.git
 cd smart-device-cloud-automation-platform
 ```
 
-- 首次运行时创建虚拟环境；已有可用的 Python 3.12 虚拟环境则跳过创建：
+- Create the virtual environment on first use; skip creation if a suitable Python 3.12 environment already exists:
 
 ```bash
 python3.12 --version
@@ -35,74 +36,74 @@ python -m pip install -e '.[dev]'
 python -m pip check
 ```
 
-- 后续新终端只需重新进入仓库并激活 `.venv`。
-- 依赖以 `pyproject.toml` 为准，目前没有锁文件；不同时间安装可能解析到不同的兼容版本。
-- dev 依赖暂将 AnyIO 限制在 `>=4.14.2,<4.15`：实测 Starlette 1.6 的 TestClient 在 AnyIO 4.15 下触发弃用警告，导致严格测试无法收集。此约束不关闭警告；上游兼容后可重新验证并解除。
+- In subsequent terminals, enter the repository and activate `.venv` again.
+- Dependencies are declared in `pyproject.toml`. There is no lockfile, so installations at different times may resolve different compatible versions.
+- The dev extra temporarily constrains AnyIO to `>=4.14.2,<4.15`: a verified Starlette 1.6 TestClient / AnyIO 4.15 combination raises a deprecation warning during strict test collection. Warnings are not suppressed; revisit this constraint after upstream compatibility is verified.
 
-## 3. 配置
+## 3. Configuration
 
-- 仅为缺失文件复制模板，不覆盖现有配置：
+- Copy templates only for missing files; preserve existing configuration:
 
 ```bash
 test -e .env || cp .env.example .env
 test -e .env.test || cp .env.example .env.test
 ```
 
-- 在本地编辑两个文件，使用已有账号的真实密码；不要把密码粘贴到日志、提交或截图中。
-- `.env` 的数据库配置示例（占位密码必须替换）：
+- Edit both files locally with your existing credentials. Never paste passwords into logs, commits, or screenshots.
+- Example database configuration for `.env`; replace the password placeholder:
 
 ```dotenv
 ENVIRONMENT=development
 DATABASE_URL=postgresql+psycopg://smart_device_user:YOUR_PASSWORD@localhost:5432/smart_device_cloud
 ```
 
-- `.env.test` 的数据库配置示例：
+- Example database configuration for `.env.test`:
 
 ```dotenv
 ENVIRONMENT=test
 DATABASE_URL=postgresql+psycopg://smart_device_user:YOUR_PASSWORD@localhost:5432/smart_device_cloud_test
 ```
 
-- 密码中的 URL 特殊字符需要百分号编码；不要把完整连接字符串输出用于排错。
-- 支持的配置：
-  - `APP_NAME`：默认 `Smart Device Cloud & Automation Platform`。
-  - `APP_VERSION`：默认 `0.1.0`。
-  - `ENVIRONMENT`：`development` 或 `test`，默认前者。
-  - `DEBUG`：默认 `false`。
-  - `DATABASE_URL`：必填，使用 `postgresql+psycopg` 驱动。
-- 进程环境变量优先于 env 文件；代码显式传入的 Settings 字段优先级更高。文件修改后重启服务，以免继续使用缓存配置。
-- 应用工厂默认读取 `.env`；Alembic 才使用 `SETTINGS_FILE` 选择配置文件。仅设置 `ENVIRONMENT=test` 不会切换到 `.env.test`。
-- `.env`、`.env.test` 已被 Git 忽略；只提交不含真实凭据的 `.env.example`。
+- Percent-encode URL-special characters in passwords. Do not print complete connection strings for troubleshooting.
+- Supported settings:
+  - `APP_NAME`: defaults to `Smart Device Cloud & Automation Platform`.
+  - `APP_VERSION`: defaults to `0.1.0`.
+  - `ENVIRONMENT`: `development` or `test`; defaults to development.
+  - `DEBUG`: defaults to `false`.
+  - `DATABASE_URL`: required; use the `postgresql+psycopg` driver.
+- Process environment variables override env files; explicitly supplied Settings fields take higher priority. Restart the service after configuration changes to avoid cached settings.
+- The application factory defaults to `.env`. Only Alembic uses `SETTINGS_FILE` to select a file. Setting `ENVIRONMENT=test` alone does not select `.env.test`.
+- Git ignores `.env` and `.env.test`. Commit only the credential-free `.env.example` template.
 
-## 4. 迁移
+## 4. Migrations
 
-- 查看仓库迁移记录，不连接数据库：
+- Inspect repository revisions without connecting to a database:
 
 ```bash
 python -m alembic heads
 python -m alembic history
 ```
 
-- 当前唯一 head 为 `f4502b63c0be`，新增 `devices` 表；其前驱 `0001_v0_baseline` 是无业务表的 V0 基线。
-- 以下第一条读取开发数据库版本，第二条会修改 `.env` 指向的开发数据库。先确认该文件指向已有的 `smart_device_cloud`；这里只允许正常升级，不要对开发数据库执行重置或降级：
+- At the V1-T1 verification snapshot, the unique head is `f4502b63c0be`, which adds `devices`. Its predecessor, `0001_v0_baseline`, is the table-free V0 baseline. Use `alembic heads` for the current revision during ongoing stage work.
+- The first command below reads the development database revision; the second modifies the database selected by `.env`. First confirm that it targets the existing `smart_device_cloud` database. Perform only normal upgrades here, never a development schema reset or downgrade:
 
 ```bash
 env -u DATABASE_URL -u ENVIRONMENT SETTINGS_FILE=.env python -m alembic current
 env -u DATABASE_URL -u ENVIRONMENT SETTINGS_FILE=.env python -m alembic upgrade head
 ```
 
-- 测试数据库的 `upgrade head -> downgrade base -> upgrade head` 由第 7 节的两个迁移验收测试覆盖。
-- `downgrade base` 会撤销全部迁移；它不是修复任意数据库状态的通用命令。仅在明确授权的可丢弃测试库中执行，不要直接复制到开发环境。
+- The two migration acceptance tests in Section 7 cover the test-only `upgrade head -> downgrade base -> upgrade head` cycle.
+- `downgrade base` reverses all migrations. It is not a general repair command for unknown database states. Run it only against an explicitly authorized disposable test database, never by copying it into development operations.
 
-## 5. 启动与接口验证
+## 5. Start and Inspect the Service
 
-- 开发服务默认使用 `.env`。清除可能遗留的数据库进程覆盖值后启动；`--no-access-log` 关闭独立的 Uvicorn 访问日志，应用自己的 JSON 请求日志仍保留：
+- Development startup defaults to `.env`. Clear stale process-level database overrides before starting. `--no-access-log` disables independent Uvicorn access logging while retaining application JSON request logs:
 
 ```bash
 env -u DATABASE_URL -u ENVIRONMENT python -m uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000 --no-access-log
 ```
 
-- 在另一个终端运行：
+- In another terminal, run:
 
 ```bash
 curl -i http://127.0.0.1:8000/health
@@ -113,35 +114,35 @@ curl -i http://127.0.0.1:8000/docs
 curl -i http://127.0.0.1:8000/openapi.json
 ```
 
-- 预期结果：
-  - `/health`：200，`{"status":"ok"}`；不代表数据库可用。
-  - `/ready`：真实执行数据库探测；可用时 200、`{"status":"ready"}`，不可用时 503、`{"status":"not_ready"}`。
-  - `/api/v1/ping`：200，`{"message":"pong"}`；响应头回传 `local-check-001`。
-  - `/ping`：404；接口只挂载在版本化路径下。
-  - `/docs`：200 HTML；浏览器打开可查看 Swagger UI，其前端资源加载可能需要网络。
-  - `/openapi.json`：200 OpenAPI JSON。
-- 停止服务：在启动终端按 Ctrl+C，让 lifespan 释放数据库引擎。
-- 开发时可自行添加 `--reload`；不要把自动重载模式当成生产部署配置。
+- Expected results:
+  - `/health`: 200, `{"status":"ok"}`; this does not prove database availability.
+  - `/ready`: executes a real database probe; 200 with `{"status":"ready"}` when available, or 503 with `{"status":"not_ready"}` otherwise.
+  - `/api/v1/ping`: 200, `{"message":"pong"}`; the response header echoes `local-check-001`.
+  - `/ping`: 404; ping is mounted only under the versioned API path.
+  - `/docs`: 200 HTML. Open it in a browser for Swagger UI; loading its frontend assets may require internet access.
+  - `/openapi.json`: 200 OpenAPI JSON.
+- Stop the service with Ctrl+C in its terminal so lifespan cleanup disposes the database engine.
+- You may add `--reload` for development. Automatic reload is not a production deployment configuration.
 
-## 6. 请求 ID、错误和日志
+## 6. Request IDs, Errors, and Logging
 
-- 传入的 `X-Request-ID` 必须只有一个，长度为 1–64，只允许 ASCII 字母、数字、点、下划线、短横线，即 `[A-Za-z0-9._-]{1,64}`。
-- 合格示例：`demo-001`、`abc_DEF.9`。空值、空格、中文、逗号、重复请求头或超长值不合格。
-- 缺失或不合格时不会拒绝请求，而是生成新的 UUID 十六进制 ID；响应头、错误体和请求日志使用同一 ID。
-- 404 错误示例（ID 每次可能不同）：
+- Accept exactly one incoming `X-Request-ID`, 1–64 characters long, using only ASCII letters, digits, dots, underscores, and hyphens: `[A-Za-z0-9._-]{1,64}`.
+- Valid examples: `demo-001`, `abc_DEF.9`. Empty values, spaces, non-ASCII characters, commas, duplicate headers, and overlong values are invalid.
+- Missing or invalid IDs do not reject the request. The application generates a new UUID hex ID and uses the same ID in the response header, error envelope, and request log.
+- Example 404 response; the ID may differ for each request:
 
 ```json
 {"error":{"code":"HTTP_404","message":"Not Found","request_id":"local-check-001"}}
 ```
 
-- HTTP 错误保留状态码，但不直接回显异常详情；验证错误使用 `VALIDATION_ERROR`，未预期异常使用 `INTERNAL_ERROR`。健康检查的 503 保持专门的 readiness 响应。
-- `app.requests` 每个请求输出一行 JSON，包含 `timestamp`、`level`、`event`、`request_id`、`method`、`route`、`status_code`、`duration_ms`。
-- `route` 使用路由模板，未匹配请求记为 `<unmatched>`；日志不收集查询参数、请求体、认证头、数据库 URL 或异常堆栈。
-- 该约束仅覆盖应用请求日志，不代表 Uvicorn 或其他库的独立日志也经过同一处理。
+- HTTP errors retain their status without echoing exception details. Validation errors use `VALIDATION_ERROR`; unexpected exceptions use `INTERNAL_ERROR`. Readiness 503 responses keep their dedicated health-check format.
+- `app.requests` emits one JSON line per request containing `timestamp`, `level`, `event`, `request_id`, `method`, `route`, `status_code`, and `duration_ms`.
+- `route` contains the route template, or `<unmatched>` for unmatched requests. Logs do not collect query parameters, request bodies, authentication headers, database URLs, or exception tracebacks.
+- This policy covers application request logs only; it does not claim that independent Uvicorn or third-party logs use the same sanitization.
 
-## 7. 验证
+## 7. Verification
 
-- 日常安全检查不会启用数据库 schema 重置；始终显式取消破坏性测试开关：
+- Routine safe checks do not enable schema resets. Explicitly unset database opt-in switches:
 
 ```bash
 env -u RUN_MIGRATION_TESTS -u RUN_POSTGRES_SMOKE python -m pytest -q -W error
@@ -151,15 +152,16 @@ python -m mypy
 python -m pip check
 ```
 
-- 默认跳过两个真实 PostgreSQL 迁移测试、四个 Device 数据库验收测试和一个只读 PostgreSQL smoke，共七项；日志、Docs/OpenAPI 及 Device metadata 检查默认执行。
-- 以下单独启用只读检查：从 `.env.test` 读取配置，要求 test 环境、本机地址、精确库名 `smart_device_cloud_test`、psycopg 驱动及无 URL 查询参数；连接强制只读并设置超时，不重置 schema：
+- At the V1-T1 snapshot, seven tests skip by default: two real migration tests, four Device database acceptance tests, and one read-only PostgreSQL smoke test. Logging, Docs/OpenAPI, and Device metadata checks run by default. Task-level test counts are recorded in CURRENT_STAGE.md.
+- Enable read-only probing separately. It loads `.env.test` and requires the test environment, a local host, the exact database name `smart_device_cloud_test`, the psycopg driver, and no URL query parameters. Connections enforce read-only transactions and timeouts; no schema is reset:
 
 ```bash
 env -u RUN_MIGRATION_TESTS RUN_POSTGRES_SMOKE=1 python -m pytest -q -W error tests/integration/test_v0_smoke.py
 ```
-- 下面是单独的、破坏性的迁移验收入口：只授权删除并重建本机 `smart_device_cloud_test.public`，其中所有对象和数据会丢失。不要并发运行服务、其他迁移或使用该测试库的测试。
-- 迁移和 Device 验收共用保护：要求本机地址、test 环境、精确库名 `smart_device_cloud_test`、psycopg 驱动及无 URL 查询参数；重置前核对实际库名并拒绝其他已连接会话。请确保独占测试库运行，不使用并行测试，也不要把开关永久导出。
-- 确认测试数据可丢弃后，再执行以下命令；它不会操作开发数据库：
+
+- The following entry point is destructive: it may drop and recreate only local `smart_device_cloud_test.public`, removing all objects and data in that schema. Do not run services, other migrations, or other tests against that database concurrently.
+- Migration and Device acceptance share target protection: local host, test environment, exact database name, psycopg driver, and no URL query parameters. Before resetting, they check the actual database name and reject other connected sessions. Ensure exclusive access, do not run parallel tests, and never permanently export the opt-in switch.
+- Run this only after confirming that the test data is disposable. It does not operate on the development database:
 
 ```bash
 env -u DATABASE_URL -u ENVIRONMENT python - <<'PY'
@@ -200,28 +202,29 @@ subprocess.run(
 PY
 ```
 
-- 执行期间不要修改 `.env.test`。上述两个文件目前预期为 14 passed，覆盖目标保护、空库升级、head → V0 baseline → head、完整 base/head 往返，以及 Device 默认值、约束、时区、schema 一致性和并发唯一冲突。最终版本应为唯一 head `f4502b63c0be`，测试创建的 Device 行会清理。
-- 测试失败时先保留错误并检查目标库和版本状态，不要对其他数据库进行重置补救。
+- Do not edit `.env.test` during execution. At the V1-T1 snapshot, these files produce 14 passed, covering target protection, empty-database upgrades, head -> V0 baseline -> head, full base/head round trips, Device defaults, constraints, timezones, schema consistency, and concurrent uniqueness. The final revision is the unique head `f4502b63c0be`; test-created Device rows are cleaned up.
+- If a test fails, preserve the error and inspect the target database and revision. Do not reset another database as a workaround.
 
-## 8. 常见问题与证据边界
+## 8. Troubleshooting and Evidence Boundaries
 
-- Python 版本或驱动错误：确认激活的是 Python 3.12 的 `.venv`，重新执行项目的 dev 安装和 `pip check`；不要随意替换为其他 PostgreSQL 驱动。
-- 缺少 `DATABASE_URL`：确认从仓库根目录执行、配置文件存在且字段已填写；不要把完整配置打印出来。
-- 修改 env 文件不生效：检查进程环境变量覆盖和配置缓存，重启服务。不要用 `SETTINGS_FILE=.env.test` 启动应用并假设它会选择测试配置。
-- `/health` 正常而 `/ready` 为 503：检查 PostgreSQL 服务、连接地址、账号、库名和权限；应用启动成功不意味着数据库连接已经成功。
-- 迁移版本不匹配：比较正确目标的 `alembic current` 与仓库 `heads/history`；不要使用 `stamp` 或删除 schema 来掩盖未知差异。
-- 默认迁移测试跳过：这是安全设计，不是数据库验证通过的证据；真实验证必须使用上面的独立入口。
-- V1-T1 验证记录（2026-09-23）：
-  - 安全回归 111 passed、7 skipped；单独启用迁移与 Device 验收为 14 passed。
-  - 在独占授权测试库上同时启用数据库验收与只读 smoke，完整回归为 118 passed，无跳过。
-  - Ruff lint/format、严格 mypy（33 个文件）、pip check 均通过；数据库与仓库最终 head 均为 f4502b63c0be。
-  - 只重建 smart_device_cloud_test.public；其他数据库未操作。未修改应用模型或迁移实现。
-- V0 历史验证记录：
-  - 2026-09-18（本地日期）：Ubuntu/WSL、Python 3.12.3；使用全新临时 venv，禁用 pip 下载缓存，从项目 dev 依赖重新安装。
-  - 首次复演发现 AnyIO 4.15 与 Starlette 1.6 的严格警告兼容问题；获得授权后增加上述 dev 约束，再新建 venv 重做安装，而非复用失败环境。
-  - 第二次启动复演：UTC 2026-09-19 01:56:58 至 01:58:37.455，约 99.5 秒。包含环境创建、安装、配置加载、测试库升级、Uvicorn 启动、六个 HTTP 检查和优雅退出，也包含操作间隔。
-  - 复用了已有仓库、env 文件、数据库和系统软件，未计入这些前置准备。为避免操作开发数据库，复演显式将应用连接覆盖为已验证的测试 URL，并使用临时本地端口；未修改 env 文件。
-  - 干净环境安全回归：107 passed、3 skipped；只读 PostgreSQL 单独启用时 T6 文件为 9 passed；Ruff lint/format、严格 mypy 和 pip check 均通过。
-  - 两个真实迁移验收测试均通过；执行前核对精确测试库且无其他连接，仅重建该库 public。数据库最终版本与仓库唯一 head 均为 `0001_v0_baseline`。
-  - HTTP 结果：health、ready、版本化 ping、docs、OpenAPI 均为 200，未版本化 ping 为 404；随后正常退出。迁移往返验证独立执行，不计入上述第二次启动耗时。
-  - 这是本地干净 Python 环境的复演证据，不声称已经在全新机器上验证；数据库内原有测试 schema 数据不保留。
+- Python or driver mismatch: confirm that the active `.venv` uses Python 3.12; reinstall the dev extra and run `pip check`. Do not arbitrarily replace the PostgreSQL driver.
+- Missing `DATABASE_URL`: confirm the repository-root working directory, configuration file, and required field. Do not print the complete configuration.
+- Env-file changes have no effect: check process overrides and cached settings, then restart. Do not start the application with `SETTINGS_FILE=.env.test` and assume it selects test configuration.
+- `/health` succeeds but `/ready` returns 503: check PostgreSQL service availability, host, credentials, database name, and privileges. Application startup does not mean a database connection has already succeeded.
+- Migration revision mismatch: compare the correct target's `alembic current` with repository `heads/history`. Do not use `stamp` or schema deletion to hide unknown differences.
+- Migration tests skipped by default: this is intentional protection, not evidence that PostgreSQL acceptance passed. Use the separate guarded entry point.
+- Retained V1-T1 verification snapshot (2026-09-23):
+  - Safe regression: 111 passed, 7 skipped. Migration/Device acceptance enabled separately: 14 passed.
+  - Both database acceptance and read-only smoke enabled on the exclusively used authorized test database: 118 passed, no skips.
+  - Ruff lint/format, strict mypy (33 files), and pip check passed. Database and repository heads both matched f4502b63c0be.
+  - Only smart_device_cloud_test.public was recreated. No other database or application model/migration implementation was changed by that test-update work.
+  - This existing snapshot is retained during translation; subsequent Task updates are recorded in CURRENT_STAGE.md until V1 completes.
+- Historical V0 verification:
+  - Local date 2026-09-18: Ubuntu/WSL, Python 3.12.3, a new temporary venv, and fresh installation of the dev extra with pip download caching disabled.
+  - The first rehearsal exposed the AnyIO 4.15 / Starlette 1.6 strict-warning incompatibility. After user approval, the dev constraint was added and installation was repeated in another new venv rather than reusing the failed environment.
+  - The second startup rehearsal ran from UTC 2026-09-19 01:56:58 to 01:58:37.455, approximately 99.5 seconds. It included environment creation, installation, configuration loading, test-database upgrade, Uvicorn startup, six HTTP checks, graceful shutdown, and time between operations.
+  - The repository, env files, database, and system software already existed; their preparation was excluded. A verified test-URL override and temporary local HTTP port protected the development database. Env files were not modified.
+  - Clean-environment safe regression: 107 passed, 3 skipped. The separately enabled PostgreSQL smoke file reported 9 passed. Ruff lint/format, strict mypy, and pip check passed.
+  - Both real migration tests passed after exact-target and other-session checks, resetting only the test schema. At that historical point, the database and unique repository head were `0001_v0_baseline`.
+  - Health, readiness, versioned ping, docs, and OpenAPI returned 200; unversioned ping returned 404; shutdown was graceful. Migration round trips were verified separately and excluded from the second startup timing.
+  - This is a local clean-Python-environment rehearsal, not proof of a literal fresh-machine installation. Original test-schema data was not retained.

@@ -127,7 +127,13 @@ def test_openapi_and_docs_are_available() -> None:
         schema = response.json()
         assert schema["info"]["title"] == settings.app_name
         assert schema["info"]["version"] == settings.app_version
-        assert set(schema["paths"]) == {"/health", "/ready", "/api/v1/ping"}
+        assert set(schema["paths"]) == {
+            "/health",
+            "/ready",
+            "/api/v1/ping",
+            "/api/v1/devices",
+            "/api/v1/devices/{device_id}",
+        }
         assert "503" in schema["paths"]["/ready"]["get"]["responses"]
 
 
