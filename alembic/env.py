@@ -8,15 +8,17 @@ from sqlalchemy.pool import NullPool
 
 from alembic import context
 from app.core.config import DEFAULT_SETTINGS_FILE, get_settings
-from app.devices.model import Device
+from app.db.base import Base
+from app.devices import model as device_model  # noqa: F401
+from app.telemetry import model as telemetry_model  # noqa: F401
 
 config = context.config
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Importing Device registers its table; this is the shared Base metadata.
-target_metadata = Device.metadata
+# The model imports above register both tables in the shared Base metadata.
+target_metadata = Base.metadata
 
 
 def get_database_url() -> str:

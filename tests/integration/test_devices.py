@@ -19,6 +19,7 @@ from alembic import command
 from app.core.config import Settings, get_settings
 from app.db.base import Base
 from app.devices.model import Device, DeviceStatus
+from app.telemetry.model import Telemetry
 from tests.integration.test_migrations import reset_test_database
 
 
@@ -48,6 +49,8 @@ def device_engine(monkeypatch: pytest.MonkeyPatch) -> Iterator[Engine]:
         if engine is not None:
             try:
                 with engine.begin() as connection:
+                    # Remove children first; preserve FK enforcement during cleanup.
+                    connection.execute(Telemetry.__table__.delete())
                     connection.execute(text("DELETE FROM devices"))
             finally:
                 engine.dispose()

@@ -1,4 +1,4 @@
-"""Opt-in PostgreSQL acceptance for the V0 baseline and V1 Device migration."""
+"""Opt-in PostgreSQL acceptance for the baseline, Device and Telemetry migrations."""
 
 import os
 from collections.abc import Iterator
@@ -188,13 +188,13 @@ def test_migrations_upgrade_empty_database_to_head(
     current_revision, table_names = read_database_state(database_url)
 
     assert current_revision == expected_head
-    assert table_names == {"alembic_version", "devices"}
+    assert table_names == {"alembic_version", "devices", "telemetry"}
 
 
 def test_latest_migration_downgrades_and_upgrades_again(
     migration_settings: Settings,
 ) -> None:
-    """Undo only Device first, then also verify the complete base/head round trip."""
+    """Return to V0, then also verify the complete base/head round trip."""
     database_url = reset_test_database(migration_settings)
     alembic_config = Config("alembic.ini")
     script = ScriptDirectory.from_config(alembic_config)
@@ -209,7 +209,7 @@ def test_latest_migration_downgrades_and_upgrades_again(
     command.upgrade(alembic_config, "head")
     assert read_database_state(database_url) == (
         expected_head,
-        {"alembic_version", "devices"},
+        {"alembic_version", "devices", "telemetry"},
     )
     command.downgrade(alembic_config, "base")
 
@@ -223,4 +223,4 @@ def test_latest_migration_downgrades_and_upgrades_again(
     current_revision, table_names = read_database_state(database_url)
 
     assert current_revision == expected_head
-    assert table_names == {"alembic_version", "devices"}
+    assert table_names == {"alembic_version", "devices", "telemetry"}
