@@ -16,6 +16,7 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
 from alembic import command
+from app.alerts.model import Alert
 from app.core.config import Settings, get_settings
 from app.db.base import Base
 from app.devices.model import Device, DeviceStatus
@@ -50,6 +51,9 @@ def device_engine(monkeypatch: pytest.MonkeyPatch) -> Iterator[Engine]:
             try:
                 with engine.begin() as connection:
                     # Remove children first; preserve FK enforcement during cleanup.
+                    # A failed/unfinished migration may not have created alerts yet.
+                    if inspect(connection).has_table("alerts"):
+                        connection.execute(delete(Alert))
                     connection.execute(delete(Telemetry))
                     connection.execute(text("DELETE FROM devices"))
             finally:

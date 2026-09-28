@@ -188,7 +188,7 @@ def test_migrations_upgrade_empty_database_to_head(
     current_revision, table_names = read_database_state(database_url)
 
     assert current_revision == expected_head
-    assert table_names == {"alembic_version", "devices", "telemetry"}
+    assert table_names == {"alembic_version", "devices", "telemetry", "alerts"}
 
 
 def test_latest_migration_downgrades_and_upgrades_again(
@@ -209,7 +209,7 @@ def test_latest_migration_downgrades_and_upgrades_again(
     command.upgrade(alembic_config, "head")
     assert read_database_state(database_url) == (
         expected_head,
-        {"alembic_version", "devices", "telemetry"},
+        {"alembic_version", "devices", "telemetry", "alerts"},
     )
     command.downgrade(alembic_config, "base")
 
@@ -223,4 +223,4 @@ def test_latest_migration_downgrades_and_upgrades_again(
     current_revision, table_names = read_database_state(database_url)
 
     assert current_revision == expected_head
-    assert table_names == {"alembic_version", "devices", "telemetry"}
+    assert table_names == {"alembic_version", "devices", "telemetry", "alerts"}

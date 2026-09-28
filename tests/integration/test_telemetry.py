@@ -206,7 +206,8 @@ def test_telemetry_migration_preserves_device_rows(device_engine: Engine) -> Non
     device_id = add_device(device_engine)
     config = Config("alembic.ini")
     script = ScriptDirectory.from_config(config)
-    assert script.get_heads() == ["438be65e5187"]
+    assert len(script.get_heads()) == 1
+    expected_head = script.get_current_head()
     assert script.get_revision("438be65e5187").down_revision == "f4502b63c0be"
     with device_engine.connect() as connection:
         before = connection.execute(
@@ -241,7 +242,7 @@ def test_telemetry_migration_preserves_device_rows(device_engine: Engine) -> Non
     with device_engine.connect() as connection:
         assert (
             connection.scalar(text("SELECT version_num FROM alembic_version"))
-            == "438be65e5187"
+            == expected_head
         )
         assert (
             connection.execute(

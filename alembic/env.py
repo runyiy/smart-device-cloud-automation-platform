@@ -7,6 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.pool import NullPool
 
 from alembic import context
+from app.alerts import model as alert_model  # noqa: F401
 from app.core.config import DEFAULT_SETTINGS_FILE, get_settings
 from app.db.base import Base
 from app.devices import model as device_model  # noqa: F401
@@ -17,7 +18,7 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# The model imports above register both tables in the shared Base metadata.
+# The model imports above register Device, Telemetry and Alert in shared metadata.
 target_metadata = Base.metadata
 
 
