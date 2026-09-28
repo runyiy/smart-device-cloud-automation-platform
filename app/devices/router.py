@@ -111,7 +111,9 @@ def patch_device(
         ) from exc
 
     except InvalidDeviceStateError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT) from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+        ) from exc
 
 
 @router.get(

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from starlette.testclient import TestClient
 
 from app.core.config import Settings
-from app.devices.model import Device
+from app.devices.model import Device, DeviceStatus
 from app.devices.schema import DeviceListQuery, DeviceUpdate
 from app.devices.service import InvalidDeviceStateError, list_devices, update_device
 from app.main import create_app
@@ -141,7 +141,7 @@ def test_row_lock_serializes_updates(device_engine: Engine, scenario: str) -> No
             assert row is not None
             row.name = "First"
             if scenario == "deactivation":
-                row.status = "inactive"
+                row.status = DeviceStatus.INACTIVE
             first.flush()
             future = executor.submit(competing_update)
             try:

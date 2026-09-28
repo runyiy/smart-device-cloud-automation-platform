@@ -6,7 +6,17 @@ from uuid import UUID, uuid4
 import pytest
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from sqlalchemy import Double, Engine, inspect, select, text
+from sqlalchemy import (
+    DateTime,
+    DefaultClause,
+    Double,
+    Engine,
+    String,
+    Table,
+    inspect,
+    select,
+    text,
+)
 from sqlalchemy.exc import DBAPIError, InvalidRequestError
 from sqlalchemy.orm import Session, joinedload
 
@@ -18,6 +28,7 @@ from tests.integration.test_devices import device_engine as device_engine
 
 def test_telemetry_metadata_contract() -> None:
     table = Telemetry.__table__
+    assert isinstance(table, Table)
     assert table.metadata is Device.metadata
     assert list(table.columns.keys()) == [
         "id",
@@ -30,18 +41,25 @@ def test_telemetry_metadata_contract() -> None:
     ]
     assert all(not c.nullable and c.onupdate is None for c in table.columns)
     assert table.c.id.type.python_type is UUID
+    assert table.c.id.default is not None
     assert table.c.id.default.is_callable and table.c.id.server_default is None
     for name in ("device_id", "metric", "value", "unit", "recorded_at"):
         assert table.c[name].default is None
         assert table.c[name].server_default is None
     assert isinstance(table.c.value.type, Double)
+    assert isinstance(table.c.metric.type, String)
+    assert isinstance(table.c.unit.type, String)
     assert table.c.metric.type.length == 64 and table.c.unit.type.length == 32
+    assert isinstance(table.c.recorded_at.type, DateTime)
+    assert isinstance(table.c.received_at.type, DateTime)
     assert table.c.recorded_at.type.timezone and table.c.received_at.type.timezone
     assert table.c.received_at.default is None
+    assert isinstance(table.c.received_at.server_default, DefaultClause)
     assert str(table.c.received_at.server_default.arg) == "CURRENT_TIMESTAMP"
     fk = next(iter(table.foreign_keys))
     assert fk.target_fullname == "devices.id" and fk.ondelete == "RESTRICT"
     assert fk.onupdate is None
+    assert fk.constraint is not None
     assert fk.constraint.name == "fk_telemetry_device_id_devices"
     assert {i.name: tuple(c.name for c in i.columns) for i in table.indexes} == {
         "ix_telemetry_device_id_recorded_at": ("device_id", "recorded_at"),
@@ -100,16 +118,18 @@ def test_telemetry_roundtrip_relationship_and_delete(device_engine: Engine) -> N
         assert samples[0].recorded_at == stamp
         assert samples[0].received_at == original_received
     with Session(device_engine) as session:
-        sample = session.get(Telemetry, ids[0])
+        fetched = session.get(Telemetry, ids[0])
+        assert fetched is not None
         with pytest.raises(InvalidRequestError, match="lazy='raise'"):
-            _ = sample.device
-        sample = session.scalar(
+            _ = fetched.device
+        loaded = session.scalar(
             select(Telemetry)
             .where(Telemetry.id == ids[0])
             .options(joinedload(Telemetry.device))
         )
-        assert sample.device.id == device_id
-        session.delete(sample)
+        assert loaded is not None
+        assert loaded.device.id == device_id
+        session.delete(loaded)
         session.commit()
         assert session.get(Device, device_id) is not None
     with device_engine.begin() as connection:
@@ -118,7 +138,7 @@ def test_telemetry_roundtrip_relationship_and_delete(device_engine: Engine) -> N
 
 def test_telemetry_database_rejects_invalid_rows(device_engine: Engine) -> None:
     device_id = add_device(device_engine)
-    cases = [
+    cases: list[tuple[str, object, str]] = [
         (field, None, "23502")
         for field in (
             "id",
@@ -162,7 +182,7 @@ def test_telemetry_database_rejects_invalid_rows(device_engine: Engine) -> None:
             data[field] = value
             with pytest.raises(DBAPIError) as caught:
                 connection.execute(statement, data)
-            assert caught.value.orig.sqlstate == code, (field, value)
+            assert getattr(caught.value.orig, "sqlstate", None) == code, (field, value)
             connection.rollback()
         # Exercise maximum lengths and server-side receipt time without ORM defaults.
         connection.execute(
@@ -178,7 +198,7 @@ def test_telemetry_database_rejects_invalid_rows(device_engine: Engine) -> None:
             connection.execute(
                 text("DELETE FROM devices WHERE id = :id"), {"id": device_id}
             )
-        assert caught.value.orig.sqlstate == "23503"
+        assert getattr(caught.value.orig, "sqlstate", None) == "23503"
         connection.rollback()
 
 

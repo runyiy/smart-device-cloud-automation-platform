@@ -11,7 +11,7 @@ import pytest
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
-from sqlalchemy import Engine, create_engine, inspect, text
+from sqlalchemy import Engine, create_engine, delete, inspect, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
@@ -50,7 +50,7 @@ def device_engine(monkeypatch: pytest.MonkeyPatch) -> Iterator[Engine]:
             try:
                 with engine.begin() as connection:
                     # Remove children first; preserve FK enforcement during cleanup.
-                    connection.execute(Telemetry.__table__.delete())
+                    connection.execute(delete(Telemetry))
                     connection.execute(text("DELETE FROM devices"))
             finally:
                 engine.dispose()

@@ -62,7 +62,9 @@ def test_invalid_query_never_calls_service(client: TestClient, query: str) -> No
         {"status": "ACTIVE"},
     ],
 )
-def test_bad_patch_never_calls_service(client: TestClient, body: dict) -> None:
+def test_bad_patch_never_calls_service(
+    client: TestClient, body: dict[str, object]
+) -> None:
     with patch("app.devices.router.update_device") as service:
         response = client.patch(f"/api/v1/devices/{uuid4()}", json=body)
     assert response.status_code == 422
