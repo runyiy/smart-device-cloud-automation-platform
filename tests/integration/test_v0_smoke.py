@@ -134,6 +134,9 @@ def test_openapi_and_docs_are_available() -> None:
             "/api/v1/devices",
             "/api/v1/devices/{device_id}",
             "/api/v1/devices/{device_id}/telemetry",
+            "/api/v1/alerts",
+            "/api/v1/alerts/{alert_id}/acknowledge",
+            "/api/v1/alerts/{alert_id}/resolve",
         }
         assert "503" in schema["paths"]["/ready"]["get"]["responses"]
 

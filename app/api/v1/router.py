@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter
 
+from app.alerts.router import router as alert_router
 from app.api.v1.schemas import PingResponse
 from app.devices.router import router as devices_router
 from app.telemetry.router import router as telemetry_router
@@ -18,3 +19,4 @@ async def ping() -> PingResponse:
 
 router.include_router(devices_router)
 router.include_router(telemetry_router)
+router.include_router(alert_router)

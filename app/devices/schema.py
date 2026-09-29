@@ -154,7 +154,7 @@ class DeviceUpdate(BaseModel):
     name: str | None = None
     model: str | None = None
     firmware_version: str | None = None
-    status: Literal["active", "inactive"] | None = None
+    status: DeviceStatus | None = None
 
     @field_validator("name", "model")
     @classmethod

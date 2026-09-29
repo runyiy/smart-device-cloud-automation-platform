@@ -25,7 +25,7 @@ class AlertStatus(StrEnum):
 
 
 class Alert(Base):
-    """A Device alert; state transitions are handled by later Service tasks."""
+    """A Device alert; state transitions are handled by the Alert service."""
 
     __tablename__ = "alerts"
 
