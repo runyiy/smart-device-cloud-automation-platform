@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.alerts.service import build_threshold_alert
 from app.devices.model import Device, DeviceStatus
 from app.devices.service import DeviceNotFoundError
 from app.telemetry.model import Telemetry
@@ -48,6 +49,13 @@ def ingest_telemetry(
         if device.last_seen_at is None or data.recorded_at > device.last_seen_at:
             device.last_seen_at = data.recorded_at
 
+        alert = build_threshold_alert(
+            device_id=device_id, metric=data.metric, value=data.value, unit=data.unit
+        )
+
+        if alert is not None:
+            session.add(alert)
+        # Sample, optional Alert and watermark succeed or roll back together.
         session.commit()
         session.refresh(telemetry)
         return telemetry

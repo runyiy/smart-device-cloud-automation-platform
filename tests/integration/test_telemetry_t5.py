@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.testclient import TestClient
 
+from app.alerts.model import Alert
 from app.core.config import Settings
 from app.devices.model import Device
 from app.devices.schema import DeviceUpdate
@@ -35,9 +36,9 @@ def seed(engine: Engine, serial: str = "T5-001") -> UUID:
         return row.id
 
 
-def sample(stamp: datetime = STAMP) -> TelemetryCreate:
+def sample(stamp: datetime = STAMP, value: float = 23.5) -> TelemetryCreate:
     return TelemetryCreate.model_validate(
-        {"metric": "temperature", "value": 23.5, "unit": "°C", "recorded_at": stamp}
+        {"metric": "temperature", "value": value, "unit": "°C", "recorded_at": stamp}
     )
 
 
@@ -100,8 +101,10 @@ def test_failed_insert_rolls_back_watermark(device_engine: Engine) -> None:
         assert session.scalar(select(func.count()).select_from(Telemetry)) == 1
 
 
+@pytest.mark.parametrize("breached", [False, True])
 def test_concurrent_ingestion_preserves_samples_and_max_time(
     device_engine: Engine,
+    breached: bool,
 ) -> None:
     device_id = seed(device_engine)
     barrier = Barrier(2)
@@ -110,7 +113,11 @@ def test_concurrent_ingestion_preserves_samples_and_max_time(
         with Session(device_engine) as session:
             barrier.wait(timeout=5)
             return ingest_telemetry(
-                session, device_id, sample(STAMP + timedelta(hours=hour_offset))
+                session,
+                device_id,
+                sample(
+                    STAMP + timedelta(hours=hour_offset), 90.0 if breached else 23.5
+                ),
             ).id
 
     with ThreadPoolExecutor(max_workers=2) as executor:
@@ -120,11 +127,15 @@ def test_concurrent_ingestion_preserves_samples_and_max_time(
         row = session.get(Device, device_id)
         assert row is not None and row.last_seen_at == STAMP + timedelta(hours=1)
         assert session.scalar(select(func.count()).select_from(Telemetry)) == 2
+        assert session.scalar(select(func.count()).select_from(Alert)) == (
+            2 if breached else 0
+        )
 
 
 @pytest.mark.parametrize("ingest_first", [False, True])
+@pytest.mark.parametrize("breached", [False, True])
 def test_ingestion_and_deactivation_lock_order(
-    device_engine: Engine, ingest_first: bool
+    device_engine: Engine, ingest_first: bool, breached: bool
 ) -> None:
     device_id = seed(device_engine)
     ready = Event()
@@ -141,7 +152,9 @@ def test_ingestion_and_deactivation_lock_order(
                 event.listen(session, "before_commit", pause_before_commit, once=True)
             if is_ingest:
                 try:
-                    ingest_telemetry(session, device_id, sample())
+                    ingest_telemetry(
+                        session, device_id, sample(value=90.0 if breached else 23.5)
+                    )
                 except InactiveDeviceError:
                     return "rejected"
                 return "ingested"
@@ -186,6 +199,9 @@ def test_ingestion_and_deactivation_lock_order(
         assert device.last_seen_at == (STAMP if ingest_first else None)
         assert session.scalar(select(func.count()).select_from(Telemetry)) == int(
             ingest_first
+        )
+        assert session.scalar(select(func.count()).select_from(Alert)) == int(
+            ingest_first and breached
         )
 
 
