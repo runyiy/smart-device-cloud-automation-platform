@@ -12,13 +12,14 @@ from app.core.config import DEFAULT_SETTINGS_FILE, get_settings
 from app.db.base import Base
 from app.devices import model as device_model  # noqa: F401
 from app.telemetry import model as telemetry_model  # noqa: F401
+from app.test_tasks import model as test_task_model  # noqa: F401
 
 config = context.config
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# The model imports above register Device, Telemetry and Alert in shared metadata.
+# Register Device, Telemetry, Alert and TestTask in the shared metadata.
 target_metadata = Base.metadata
 
 

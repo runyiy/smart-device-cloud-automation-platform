@@ -21,6 +21,7 @@ from app.core.config import Settings, get_settings
 from app.db.base import Base
 from app.devices.model import Device, DeviceStatus
 from app.telemetry.model import Telemetry
+from app.test_tasks.model import TestTask as DeviceTestTask
 from tests.integration.test_migrations import reset_test_database
 
 
@@ -51,7 +52,9 @@ def device_engine(monkeypatch: pytest.MonkeyPatch) -> Iterator[Engine]:
             try:
                 with engine.begin() as connection:
                     # Remove children first; preserve FK enforcement during cleanup.
-                    # A failed/unfinished migration may not have created alerts yet.
+                    # A failed or downgraded migration may lack newer child tables.
+                    if inspect(connection).has_table("test_tasks"):
+                        connection.execute(delete(DeviceTestTask))
                     if inspect(connection).has_table("alerts"):
                         connection.execute(delete(Alert))
                     connection.execute(delete(Telemetry))

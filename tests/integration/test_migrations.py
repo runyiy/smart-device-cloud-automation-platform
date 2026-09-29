@@ -172,7 +172,7 @@ def test_database_reset_rejects_unsafe_targets(
 def test_migrations_upgrade_empty_database_to_head(
     migration_settings: Settings,
 ) -> None:
-    """Preserve the V0 baseline, then upgrade it to the Device head."""
+    """Preserve the V0 baseline, then upgrade it to the current four-model head."""
     database_url = reset_test_database(migration_settings)
     alembic_config = Config("alembic.ini")
 
@@ -188,7 +188,13 @@ def test_migrations_upgrade_empty_database_to_head(
     current_revision, table_names = read_database_state(database_url)
 
     assert current_revision == expected_head
-    assert table_names == {"alembic_version", "devices", "telemetry", "alerts"}
+    assert table_names == {
+        "alembic_version",
+        "devices",
+        "telemetry",
+        "alerts",
+        "test_tasks",
+    }
 
 
 def test_latest_migration_downgrades_and_upgrades_again(
@@ -209,7 +215,7 @@ def test_latest_migration_downgrades_and_upgrades_again(
     command.upgrade(alembic_config, "head")
     assert read_database_state(database_url) == (
         expected_head,
-        {"alembic_version", "devices", "telemetry", "alerts"},
+        {"alembic_version", "devices", "telemetry", "alerts", "test_tasks"},
     )
     command.downgrade(alembic_config, "base")
 
@@ -223,4 +229,10 @@ def test_latest_migration_downgrades_and_upgrades_again(
     current_revision, table_names = read_database_state(database_url)
 
     assert current_revision == expected_head
-    assert table_names == {"alembic_version", "devices", "telemetry", "alerts"}
+    assert table_names == {
+        "alembic_version",
+        "devices",
+        "telemetry",
+        "alerts",
+        "test_tasks",
+    }
