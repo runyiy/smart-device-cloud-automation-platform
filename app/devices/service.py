@@ -2,11 +2,12 @@
 
 from uuid import UUID
 
-from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.db.transaction import transaction
 from app.devices.model import Device
+from app.devices.repository import DeviceRepository
 from app.devices.schema import DeviceCreate, DeviceListQuery, DeviceUpdate
 
 
@@ -19,23 +20,22 @@ class DuplicateSerialNumberError(Exception):
 
 
 def create_device(session: Session, data: DeviceCreate) -> Device:
-    """Persist one device; own commit/rollback and translate only serial conflicts."""
-    try:
-        device = Device(
-            serial_number=data.serial_number,
-            name=data.name,
-            model=data.model,
-            firmware_version=data.firmware_version,
-        )
+    """Create through the write boundary; translate only exact serial conflicts."""
 
-        session.add(device)
-        session.commit()
-        session.refresh(device)
-        return device
+    device = Device(
+        serial_number=data.serial_number,
+        name=data.name,
+        model=data.model,
+        firmware_version=data.firmware_version,
+    )
+    repo = DeviceRepository(session)
+
+    try:
+        with transaction(session):
+            repo.add(device)
 
     except IntegrityError as exc:
-        session.rollback()
-
+        # The write boundary has already rolled back before error translation.
         sqlstate = getattr(exc.orig, "sqlstate", None)
 
         constraint_name = getattr(
@@ -51,15 +51,21 @@ def create_device(session: Session, data: DeviceCreate) -> Device:
 
         raise
 
+    try:
+        repo.refresh(device)
+
     except SQLAlchemyError:
+        # Only the failed read-back is cleaned up; the write is already committed.
         session.rollback()
         raise
+
+    return device
 
 
 def get_device(session: Session, device_id: UUID) -> Device:
     """Return one device or raise DeviceNotFoundError; never commit a read."""
-    stmt = select(Device).where(Device.id == device_id)
-    device = session.scalar(stmt)
+    repo = DeviceRepository(session)
+    device = repo.get(device_id, for_update=False)
 
     if device is None:
         raise DeviceNotFoundError(
@@ -70,60 +76,23 @@ def get_device(session: Session, device_id: UUID) -> Device:
 
 
 class InvalidDeviceStateError(Exception):
-    """An inactive device cannot be reactivated within V1-T3."""
+    """An inactive device cannot be reactivated."""
 
 
 def list_devices(session: Session, query: DeviceListQuery) -> tuple[list[Device], int]:
     """Return a filtered, stably ordered page and its unpaginated total."""
-    filters = []
-
-    if query.status is not None:
-        filters.append(Device.status == query.status)
-
-    if query.model is not None:
-        filters.append(Device.model == query.model)
-
-    if query.serial_number is not None:
-        filters.append(Device.serial_number == query.serial_number)
-
-    stmt = select(Device).where(*filters)
-
-    count_stmt = select(func.count()).select_from(Device).where(*filters)
-
-    total = int(session.scalar(count_stmt) or 0)
-
-    sort_columns = {
-        "created_at": Device.created_at,
-        "serial_number": Device.serial_number,
-    }
-
-    sort_column = sort_columns[query.sort_by]
-
-    if query.sort_order == "asc":
-        stmt = stmt.order_by(
-            sort_column.asc(),
-            Device.id.asc(),
-        )
-    else:
-        stmt = stmt.order_by(
-            sort_column.desc(),
-            Device.id.desc(),
-        )
-
-    offset = (query.page - 1) * query.page_size
-    stmt = stmt.offset(offset).limit(query.page_size)
-
-    devices = list(session.scalars(stmt).all())
+    repo = DeviceRepository(session)
+    devices, total = repo.list_page(query)
 
     return devices, total
 
 
 def update_device(session: Session, device_id: UUID, data: DeviceUpdate) -> Device:
     """Lock the row, validate transitions, and atomically persist supplied fields."""
-    try:
-        stmt = select(Device).where(Device.id == device_id).with_for_update()
 
-        device = session.scalar(stmt)
+    repo = DeviceRepository(session)
+    with transaction(session):
+        device = repo.get(device_id, for_update=True)
 
         if device is None:
             raise DeviceNotFoundError(
@@ -145,14 +114,12 @@ def update_device(session: Session, device_id: UUID, data: DeviceUpdate) -> Devi
         if "status" in updates:
             device.status = updates["status"]
 
-        session.commit()
-        session.refresh(device)
-        return device
-
-    except (DeviceNotFoundError, InvalidDeviceStateError):
-        session.rollback()
-        raise
+    try:
+        repo.refresh(device)
 
     except SQLAlchemyError:
+        # Only the failed read-back is cleaned up; the write is already committed.
         session.rollback()
         raise
+
+    return device
