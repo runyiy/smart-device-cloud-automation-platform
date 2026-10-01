@@ -309,7 +309,7 @@ def test_new_migration_round_trip_preserves_previous_data(
 ) -> None:
     config = Config("alembic.ini")
     script = ScriptDirectory.from_config(config)
-    assert script.get_heads() == ["237c5f37c6c2"]
+    assert len(script.get_heads()) == 1
     revision = script.get_revision("237c5f37c6c2")
     assert revision is not None and revision.down_revision == "68cc8b7ce48b"
     device_id = seed(device_engine)
@@ -362,7 +362,7 @@ def test_new_migration_round_trip_preserves_previous_data(
     with device_engine.connect() as connection:
         assert (
             connection.scalar(text("SELECT version_num FROM alembic_version"))
-            == "237c5f37c6c2"
+            == script.get_current_head()
         )
         assert connection.scalar(text("SELECT count(*) FROM test_tasks")) == 0
         for table in tables:

@@ -172,7 +172,7 @@ def test_database_reset_rejects_unsafe_targets(
 def test_migrations_upgrade_empty_database_to_head(
     migration_settings: Settings,
 ) -> None:
-    """Preserve the V0 baseline, then upgrade it to the current four-model head."""
+    """Preserve the V0 baseline, then upgrade it to the current model head."""
     database_url = reset_test_database(migration_settings)
     alembic_config = Config("alembic.ini")
 
@@ -194,6 +194,7 @@ def test_migrations_upgrade_empty_database_to_head(
         "telemetry",
         "alerts",
         "test_tasks",
+        "users",
     }
 
 
@@ -215,7 +216,7 @@ def test_latest_migration_downgrades_and_upgrades_again(
     command.upgrade(alembic_config, "head")
     assert read_database_state(database_url) == (
         expected_head,
-        {"alembic_version", "devices", "telemetry", "alerts", "test_tasks"},
+        {"alembic_version", "devices", "telemetry", "alerts", "test_tasks", "users"},
     )
     command.downgrade(alembic_config, "base")
 
@@ -235,4 +236,5 @@ def test_latest_migration_downgrades_and_upgrades_again(
         "telemetry",
         "alerts",
         "test_tasks",
+        "users",
     }

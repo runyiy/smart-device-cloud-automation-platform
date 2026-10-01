@@ -53,7 +53,13 @@ with (
         check=True,
         timeout=15,
     )
-    assert json.loads(result.stdout) == ["alerts", "devices", "telemetry", "test_tasks"]
+    assert json.loads(result.stdout) == [
+        "alerts",
+        "devices",
+        "telemetry",
+        "test_tasks",
+        "users",
+    ]
 
 
 def test_alert_metadata_contract() -> None:

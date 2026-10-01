@@ -13,13 +13,14 @@ from app.db.base import Base
 from app.devices import model as device_model  # noqa: F401
 from app.telemetry import model as telemetry_model  # noqa: F401
 from app.test_tasks import model as test_task_model  # noqa: F401
+from app.users import model as user_model  # noqa: F401
 
 config = context.config
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Register Device, Telemetry, Alert and TestTask in the shared metadata.
+# Register the business models and User in the shared metadata.
 target_metadata = Base.metadata
 
 
