@@ -11,7 +11,11 @@ from sqlalchemy.orm import Session
 from app.alerts.model import Alert, AlertStatus
 from app.alerts.repository import AlertRepository
 from app.alerts.schema import AlertListQuery
-from app.alerts.service import acknowledge_alert, resolve_alert
+from app.alerts.service import (
+    InvalidAlertStateError,
+    acknowledge_alert,
+    resolve_alert,
+)
 from tests.integration.test_alert_t8 import seed
 from tests.integration.test_devices import device_engine as device_engine
 
@@ -97,3 +101,28 @@ def test_action_readback_failure_preserves_durable_state_and_retry_timestamp(
             stamp = row.resolved_at
         retried = operation(session, alert_id)
         assert retried.resolved_at == stamp
+
+
+@pytest.mark.parametrize("action", ["acknowledge", "resolve"])
+def test_cached_alert_uses_resolved_state_after_lock(
+    device_engine: Engine, action: str
+) -> None:
+    alert_id = seed(device_engine)[0]
+    with Session(device_engine) as stale:
+        cached = AlertRepository(stale).get(alert_id)
+        assert cached is not None and cached.status is AlertStatus.OPEN
+        with Session(device_engine) as winner:
+            completed = resolve_alert(winner, alert_id)
+            stamp = completed.resolved_at
+            assert stamp is not None
+        if action == "acknowledge":
+            with pytest.raises(InvalidAlertStateError):
+                acknowledge_alert(stale, alert_id)
+            assert not stale.in_transaction()
+        else:
+            repeated = resolve_alert(stale, alert_id)
+            assert repeated is cached and repeated.resolved_at == stamp
+    with Session(device_engine) as observer:
+        stored = observer.get(Alert, alert_id)
+        assert stored is not None and stored.status is AlertStatus.RESOLVED
+        assert stored.resolved_at == stamp

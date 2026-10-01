@@ -25,9 +25,15 @@ class DeviceRepository:
         self.session.add(device)
 
     def get(self, device_id: UUID, *, for_update: bool = False) -> Device | None:
-        """Look up an ID, optionally locking until the caller ends its transaction."""
+        """Look up an ID, optionally locking and reloading its current values."""
         if for_update:
-            stmt = select(Device).where(Device.id == device_id).with_for_update()
+            stmt = (
+                select(Device)
+                .where(Device.id == device_id)
+                .with_for_update()
+                # Reload cached attributes so decisions use the locked row.
+                .execution_options(populate_existing=True)
+            )
         else:
             stmt = select(Device).where(Device.id == device_id)
 

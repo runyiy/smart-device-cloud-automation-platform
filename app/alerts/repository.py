@@ -25,9 +25,15 @@ class AlertRepository:
         self.session.add(alert)
 
     def get(self, alert_id: UUID, *, for_update: bool = False) -> Alert | None:
-        """Look up an ID, optionally locking; return None for an absent row."""
+        """Look up an ID, optionally locking and reloading; return None if absent."""
         if for_update:
-            stmt = select(Alert).where(Alert.id == alert_id).with_for_update()
+            stmt = (
+                select(Alert)
+                .where(Alert.id == alert_id)
+                .with_for_update()
+                # Reload cached attributes so decisions use the locked row.
+                .execution_options(populate_existing=True)
+            )
         else:
             stmt = select(Alert).where(Alert.id == alert_id)
 

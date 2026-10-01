@@ -4,13 +4,15 @@ from datetime import UTC, datetime
 from typing import cast
 from uuid import UUID
 
-from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.devices.model import Device, DeviceStatus
+from app.db.transaction import transaction
+from app.devices.model import DeviceStatus
+from app.devices.repository import DeviceRepository
 from app.devices.service import DeviceNotFoundError
 from app.test_tasks.model import TestTask, TestTaskStatus
+from app.test_tasks.repository import TestTaskRepository
 from app.test_tasks.schema import TestTaskCreate, TestTaskUpdate
 
 
@@ -28,10 +30,11 @@ class InvalidTestTaskStateError(Exception):
 
 def create_test_task(session: Session, data: TestTaskCreate) -> TestTask:
     """Lock an active Device and commit one new pending task."""
-    try:
-        stmt = select(Device).where(Device.id == data.device_id).with_for_update()
+    repo_device = DeviceRepository(session)
+    repo_test_task = TestTaskRepository(session)
 
-        device = session.scalar(stmt)
+    with transaction(session):
+        device = repo_device.get(data.device_id, for_update=True)
 
         if device is None:
             raise DeviceNotFoundError(
@@ -48,26 +51,24 @@ def create_test_task(session: Session, data: TestTaskCreate) -> TestTask:
             name=data.name,
             summary=data.summary,
         )
+        repo_test_task.add(test_task)
 
-        session.add(test_task)
-        session.commit()
-        session.refresh(test_task)
-        return test_task
-
-    except (DeviceNotFoundError, InactiveDeviceError):
-        session.rollback()
-        raise
+    try:
+        repo_test_task.refresh(test_task)
     except SQLAlchemyError:
+        # Clean up failed read-back; the successful write is already committed.
         session.rollback()
         raise
+
+    return test_task
 
 
 def get_test_task(session: Session, task_id: UUID) -> TestTask:
     """Read one task without committing or loading its Device relationship."""
 
-    stmt = select(TestTask).where(TestTask.id == task_id)
+    repo_test_task = TestTaskRepository(session)
 
-    test_task = session.scalar(stmt)
+    test_task = repo_test_task.get(task_id, for_update=False)
 
     if test_task is None:
         raise TestTaskNotFoundError(
@@ -79,10 +80,10 @@ def get_test_task(session: Session, task_id: UUID) -> TestTask:
 
 def update_test_task(session: Session, task_id: UUID, data: TestTaskUpdate) -> TestTask:
     """Lock the task and atomically apply supplied fields and valid transitions."""
-    try:
-        stmt = select(TestTask).where(TestTask.id == task_id).with_for_update()
+    repo_test_task = TestTaskRepository(session)
 
-        test_task = session.scalar(stmt)
+    with transaction(session):
+        test_task = repo_test_task.get(task_id, for_update=True)
 
         if test_task is None:
             raise TestTaskNotFoundError(
@@ -155,14 +156,12 @@ def update_test_task(session: Session, task_id: UUID, data: TestTaskUpdate) -> T
         if "summary" in updates:
             test_task.summary = updates["summary"]
 
-        session.commit()
-        session.refresh(test_task)
-        return test_task
-
-    except (TestTaskNotFoundError, InvalidTestTaskStateError):
-        session.rollback()
-        raise
+    try:
+        repo_test_task.refresh(test_task)
 
     except SQLAlchemyError:
+        # Clean up failed read-back; the successful write is already committed.
         session.rollback()
         raise
+
+    return test_task
