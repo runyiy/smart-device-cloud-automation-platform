@@ -3,12 +3,13 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.alerts.model import Alert, AlertSeverity, AlertStatus
+from app.alerts.repository import AlertRepository
 from app.alerts.schema import AlertListQuery
+from app.db.transaction import transaction
 
 
 def build_threshold_alert(
@@ -55,48 +56,18 @@ class InvalidAlertStateError(Exception):
 
 def list_alerts(session: Session, query: AlertListQuery) -> tuple[list[Alert], int]:
     """Return a filtered, stably ordered page and total without committing."""
-    filters = []
-
-    if query.device_id is not None:
-        filters.append(Alert.device_id == query.device_id)
-    if query.status is not None:
-        filters.append(Alert.status == query.status)
-    if query.severity is not None:
-        filters.append(Alert.severity == query.severity)
-    if query.type is not None:
-        filters.append(Alert.type == query.type)
-
-    stmt = select(Alert).where(*filters)
-
-    count_stmt = select(func.count()).select_from(Alert).where(*filters)
-
-    total = int(session.scalar(count_stmt) or 0)
-
-    if query.sort_order == "asc":
-        stmt = stmt.order_by(
-            Alert.triggered_at.asc(),
-            Alert.id.asc(),
-        )
-    else:
-        stmt = stmt.order_by(
-            Alert.triggered_at.desc(),
-            Alert.id.desc(),
-        )
-
-    offset = (query.page - 1) * query.page_size
-    stmt = stmt.offset(offset).limit(query.page_size)
-
-    alerts = list(session.scalars(stmt).all())
+    repo_alert = AlertRepository(session)
+    alerts, total = repo_alert.list_page(query)
 
     return alerts, total
 
 
 def acknowledge_alert(session: Session, alert_id: UUID) -> Alert:
     """Lock before checking state; acknowledge idempotently or reject resolution."""
-    try:
-        stmt = select(Alert).where(Alert.id == alert_id).with_for_update()
+    repo_alert = AlertRepository(session)
 
-        alert = session.scalar(stmt)
+    with transaction(session):
+        alert = repo_alert.get(alert_id, for_update=True)
 
         if alert is None:
             raise AlertNotFoundError("Alert not found")
@@ -106,25 +77,23 @@ def acknowledge_alert(session: Session, alert_id: UUID) -> Alert:
         elif alert.status == AlertStatus.RESOLVED:
             raise InvalidAlertStateError("Alert state is invalid")
 
-        session.commit()
-        session.refresh(alert)
-        return alert
-
-    except (AlertNotFoundError, InvalidAlertStateError):
-        session.rollback()
-        raise
+    try:
+        repo_alert.refresh(alert)
 
     except SQLAlchemyError:
+        # Clean up failed read-back; the successful write is already committed.
         session.rollback()
         raise
+
+    return alert
 
 
 def resolve_alert(session: Session, alert_id: UUID) -> Alert:
     """Lock and resolve once, preserving the timestamp on repeated calls."""
-    try:
-        stmt = select(Alert).where(Alert.id == alert_id).with_for_update()
+    repo_alert = AlertRepository(session)
 
-        alert = session.scalar(stmt)
+    with transaction(session):
+        alert = repo_alert.get(alert_id, for_update=True)
 
         if alert is None:
             raise AlertNotFoundError("Alert not found")
@@ -141,14 +110,12 @@ def resolve_alert(session: Session, alert_id: UUID) -> Alert:
                 alert.triggered_at,
             )
 
-        session.commit()
-        session.refresh(alert)
-        return alert
-
-    except AlertNotFoundError:
-        session.rollback()
-        raise
+    try:
+        repo_alert.refresh(alert)
 
     except SQLAlchemyError:
+        # Clean up failed read-back; the successful write is already committed.
         session.rollback()
         raise
+
+    return alert

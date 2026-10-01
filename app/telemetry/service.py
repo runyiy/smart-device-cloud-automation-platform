@@ -2,14 +2,17 @@
 
 from uuid import UUID
 
-from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.alerts.repository import AlertRepository
 from app.alerts.service import build_threshold_alert
-from app.devices.model import Device, DeviceStatus
+from app.db.transaction import transaction
+from app.devices.model import DeviceStatus
+from app.devices.repository import DeviceRepository
 from app.devices.service import DeviceNotFoundError
 from app.telemetry.model import Telemetry
+from app.telemetry.repository import TelemetryRepository
 from app.telemetry.schema import TelemetryCreate, TelemetryListQuery
 
 
@@ -21,10 +24,12 @@ def ingest_telemetry(
     session: Session, device_id: UUID, data: TelemetryCreate
 ) -> Telemetry:
     """Persist one sample and advance the Device watermark in one transaction."""
-    try:
-        stmt = select(Device).where(Device.id == device_id).with_for_update()
-
-        device = session.scalar(stmt)
+    repo_device = DeviceRepository(session)
+    repo_telemetry = TelemetryRepository(session)
+    repo_alert = AlertRepository(session)
+    with transaction(session):
+        # Serialize status and watermark decisions with other Device writers.
+        device = repo_device.get(device_id, for_update=True)
 
         if device is None:
             raise DeviceNotFoundError(
@@ -44,7 +49,7 @@ def ingest_telemetry(
             recorded_at=data.recorded_at,
         )
 
-        session.add(telemetry)
+        repo_telemetry.add(telemetry)
 
         if device.last_seen_at is None or data.recorded_at > device.last_seen_at:
             device.last_seen_at = data.recorded_at
@@ -54,63 +59,33 @@ def ingest_telemetry(
         )
 
         if alert is not None:
-            session.add(alert)
+            repo_alert.add(alert)
         # Sample, optional Alert and watermark succeed or roll back together.
-        session.commit()
-        session.refresh(telemetry)
-        return telemetry
 
-    except (DeviceNotFoundError, InactiveDeviceError):
-        session.rollback()
-        raise
+    try:
+        repo_telemetry.refresh(telemetry)
 
     except SQLAlchemyError:
+        # Clean up failed read-back; the successful write is already committed.
         session.rollback()
         raise
+
+    return telemetry
 
 
 def list_telemetry(
     session: Session, device_id: UUID, query: TelemetryListQuery
 ) -> tuple[list[Telemetry], int]:
     """Return a Device's filtered page and total without committing."""
-    device = session.scalar(select(Device).where(Device.id == device_id))
+    repo_device = DeviceRepository(session)
+    repo_telemetry = TelemetryRepository(session)
+
+    # This existence check is read-only and must not hold a Device write lock.
+    device = repo_device.get(device_id, for_update=False)
 
     if device is None:
         raise DeviceNotFoundError("Device not found")
 
-    filters = [
-        Telemetry.device_id == device_id,
-    ]
-
-    if query.metric is not None:
-        filters.append(Telemetry.metric == query.metric)
-
-    if query.from_time is not None:
-        filters.append(Telemetry.recorded_at >= query.from_time)
-
-    if query.to_time is not None:
-        filters.append(Telemetry.recorded_at <= query.to_time)
-
-    stmt = select(Telemetry).where(*filters)
-
-    count_stmt = select(func.count()).select_from(Telemetry).where(*filters)
-
-    total = int(session.scalar(count_stmt) or 0)
-
-    if query.sort_order == "asc":
-        stmt = stmt.order_by(
-            Telemetry.recorded_at.asc(),
-            Telemetry.id.asc(),
-        )
-    else:
-        stmt = stmt.order_by(
-            Telemetry.recorded_at.desc(),
-            Telemetry.id.desc(),
-        )
-
-    offset = (query.page - 1) * query.page_size
-    stmt = stmt.offset(offset).limit(query.page_size)
-
-    telemetries = list(session.scalars(stmt).all())
+    telemetries, total = repo_telemetry.list_page(device_id, query)
 
     return telemetries, total
