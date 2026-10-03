@@ -1,7 +1,7 @@
 from enum import StrEnum
 from functools import lru_cache
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_SETTINGS_FILE = ".env"
@@ -29,6 +29,13 @@ class Settings(BaseSettings):
     environment: Environment = Environment.DEVELOPMENT
     debug: bool = False
     database_url: SecretStr
+
+    jwt_secret_key: SecretStr
+    access_token_ttl_seconds: int = Field(
+        default=900,
+        ge=60,
+        le=3600,
+    )
 
 
 @lru_cache
