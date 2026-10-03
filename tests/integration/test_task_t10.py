@@ -9,7 +9,6 @@ import pytest
 from sqlalchemy import Engine, event, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from starlette.testclient import TestClient
 
 from app.core.config import Settings
 from app.devices.model import Device, DeviceStatus
@@ -29,6 +28,7 @@ from app.test_tasks.service import (
 )
 from app.test_tasks.service import TestTaskNotFoundError as TaskNotFoundError
 from tests.integration.test_devices import device_engine as device_engine
+from tests.rbac_support import admin_test_client
 
 STAMP = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -289,7 +289,7 @@ def test_http_lifecycle_preserves_omitted_fields(device_engine: Engine) -> None:
             database_url=device_engine.url.render_as_string(hide_password=False),
         )
     )
-    with TestClient(app, raise_server_exceptions=False) as client:
+    with admin_test_client(app, device_engine, raise_server_exceptions=False) as client:
         created = client.post(
             "/api/v1/test-tasks",
             json={

@@ -9,6 +9,7 @@ from starlette import status
 
 from app.api.dependencies import get_db_session
 from app.api.errors import ErrorResponse
+from app.auth.authorization import require_roles
 from app.devices.service import DeviceNotFoundError
 from app.telemetry.schema import (
     TelemetryCreate,
@@ -17,6 +18,7 @@ from app.telemetry.schema import (
     TelemetryRead,
 )
 from app.telemetry.service import InactiveDeviceError, ingest_telemetry, list_telemetry
+from app.users.model import UserRole
 
 router = APIRouter(prefix="/devices/{device_id}/telemetry", tags=["telemetry"])
 
@@ -25,7 +27,21 @@ router = APIRouter(prefix="/devices/{device_id}/telemetry", tags=["telemetry"])
     "",
     response_model=TelemetryRead,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[
+        Depends(
+            require_roles(
+                UserRole.ADMIN,
+                UserRole.OPERATOR,
+            )
+        )
+    ],
     responses={
+        status.HTTP_401_UNAUTHORIZED: {
+            "model": ErrorResponse,
+        },
+        status.HTTP_403_FORBIDDEN: {
+            "model": ErrorResponse,
+        },
         status.HTTP_404_NOT_FOUND: {
             "model": ErrorResponse,
         },
@@ -67,7 +83,22 @@ def post_telemetry(
     "",
     response_model=TelemetryListResponse,
     status_code=status.HTTP_200_OK,
+    dependencies=[
+        Depends(
+            require_roles(
+                UserRole.ADMIN,
+                UserRole.OPERATOR,
+                UserRole.VIEWER,
+            )
+        )
+    ],
     responses={
+        status.HTTP_401_UNAUTHORIZED: {
+            "model": ErrorResponse,
+        },
+        status.HTTP_403_FORBIDDEN: {
+            "model": ErrorResponse,
+        },
         status.HTTP_404_NOT_FOUND: {
             "model": ErrorResponse,
         },

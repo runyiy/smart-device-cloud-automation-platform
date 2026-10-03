@@ -8,7 +8,6 @@ from uuid import UUID
 import pytest
 from sqlalchemy import Engine, select, text
 from sqlalchemy.orm import Session
-from starlette.testclient import TestClient
 
 from app.core.config import Settings
 from app.devices.model import Device, DeviceStatus
@@ -16,6 +15,7 @@ from app.devices.schema import DeviceListQuery, DeviceUpdate
 from app.devices.service import InvalidDeviceStateError, list_devices, update_device
 from app.main import create_app
 from tests.integration.test_devices import device_engine as device_engine
+from tests.rbac_support import admin_test_client
 
 
 def seed(engine: Engine) -> list[UUID]:
@@ -77,7 +77,7 @@ def test_patch_persistence_states_and_atomic_rejection(device_engine: Engine) ->
         )
     )
     path = f"/api/v1/devices/{ids[0]}"
-    with TestClient(app) as client:
+    with admin_test_client(app, device_engine) as client:
         before = client.get(path).json()
         for body in (
             {"status": "active"},

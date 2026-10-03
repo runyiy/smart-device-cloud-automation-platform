@@ -10,10 +10,12 @@ from sqlalchemy.orm import Session
 from starlette.testclient import TestClient
 
 from app.api.dependencies import get_db_session
+from app.auth.dependencies import get_current_user
 from app.core.config import Settings
 from app.devices.model import Device, DeviceStatus
 from app.devices.service import DeviceNotFoundError, DuplicateSerialNumberError
 from app.main import create_app
+from app.users.model import User, UserRole
 
 
 @pytest.fixture
@@ -22,6 +24,8 @@ def client() -> Iterator[TestClient]:
         Settings(_env_file=None, database_url="sqlite+pysqlite:///:memory:")
     )
     app.dependency_overrides[get_db_session] = lambda: MagicMock(spec=Session)
+    # This fixture isolates business HTTP mapping; RBAC tests use real tokens.
+    app.dependency_overrides[get_current_user] = lambda: User(role=UserRole.ADMIN)
     with TestClient(app, raise_server_exceptions=False) as test_client:
         yield test_client
 

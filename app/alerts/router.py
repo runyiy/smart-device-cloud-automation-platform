@@ -20,6 +20,8 @@ from app.alerts.service import (
 )
 from app.api.dependencies import get_db_session
 from app.api.errors import ErrorResponse
+from app.auth.authorization import require_roles
+from app.users.model import UserRole
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 
@@ -27,7 +29,22 @@ router = APIRouter(prefix="/alerts", tags=["alerts"])
 @router.get(
     "",
     response_model=AlertListResponse,
+    dependencies=[
+        Depends(
+            require_roles(
+                UserRole.ADMIN,
+                UserRole.OPERATOR,
+                UserRole.VIEWER,
+            )
+        )
+    ],
     responses={
+        status.HTTP_401_UNAUTHORIZED: {
+            "model": ErrorResponse,
+        },
+        status.HTTP_403_FORBIDDEN: {
+            "model": ErrorResponse,
+        },
         status.HTTP_422_UNPROCESSABLE_CONTENT: {
             "model": ErrorResponse,
         },
@@ -51,7 +68,21 @@ def list_alerts(
 @router.post(
     "/{alert_id}/acknowledge",
     response_model=AlertRead,
+    dependencies=[
+        Depends(
+            require_roles(
+                UserRole.ADMIN,
+                UserRole.OPERATOR,
+            )
+        )
+    ],
     responses={
+        status.HTTP_401_UNAUTHORIZED: {
+            "model": ErrorResponse,
+        },
+        status.HTTP_403_FORBIDDEN: {
+            "model": ErrorResponse,
+        },
         status.HTTP_404_NOT_FOUND: {
             "model": ErrorResponse,
         },
@@ -87,7 +118,21 @@ def acknowledge_alert(
 @router.post(
     "/{alert_id}/resolve",
     response_model=AlertRead,
+    dependencies=[
+        Depends(
+            require_roles(
+                UserRole.ADMIN,
+                UserRole.OPERATOR,
+            )
+        )
+    ],
     responses={
+        status.HTTP_401_UNAUTHORIZED: {
+            "model": ErrorResponse,
+        },
+        status.HTTP_403_FORBIDDEN: {
+            "model": ErrorResponse,
+        },
         status.HTTP_404_NOT_FOUND: {
             "model": ErrorResponse,
         },

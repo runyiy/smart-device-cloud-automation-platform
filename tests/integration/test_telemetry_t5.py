@@ -10,7 +10,6 @@ import pytest
 from sqlalchemy import Engine, event, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from starlette.testclient import TestClient
 
 from app.alerts.model import Alert
 from app.core.config import Settings
@@ -22,6 +21,7 @@ from app.telemetry.model import Telemetry
 from app.telemetry.schema import TelemetryCreate, TelemetryListQuery
 from app.telemetry.service import InactiveDeviceError, ingest_telemetry, list_telemetry
 from tests.integration.test_devices import device_engine as device_engine
+from tests.rbac_support import admin_test_client
 
 STAMP = datetime(2026, 9, 26, 10, tzinfo=UTC)
 
@@ -215,7 +215,7 @@ def test_http_ingestion_and_history_roundtrip(device_engine: Engine) -> None:
         )
     )
     path = f"/api/v1/devices/{device_id}/telemetry"
-    with TestClient(app) as client:
+    with admin_test_client(app, device_engine) as client:
         body = {
             "metric": "temperature",
             "value": 0,

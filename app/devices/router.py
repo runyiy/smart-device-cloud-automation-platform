@@ -9,6 +9,7 @@ from starlette import status
 
 from app.api.dependencies import get_db_session
 from app.api.errors import ErrorResponse
+from app.auth.authorization import require_roles
 from app.devices.schema import (
     DeviceCreate,
     DeviceListQuery,
@@ -25,6 +26,7 @@ from app.devices.service import (
     list_devices,
     update_device,
 )
+from app.users.model import UserRole
 
 router = APIRouter(prefix="/devices", tags=["devices"])
 
@@ -33,7 +35,20 @@ router = APIRouter(prefix="/devices", tags=["devices"])
     "",
     response_model=DeviceRead,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[
+        Depends(
+            require_roles(
+                UserRole.ADMIN,
+            )
+        )
+    ],
     responses={
+        status.HTTP_401_UNAUTHORIZED: {
+            "model": ErrorResponse,
+        },
+        status.HTTP_403_FORBIDDEN: {
+            "model": ErrorResponse,
+        },
         status.HTTP_409_CONFLICT: {
             "model": ErrorResponse,
         },
@@ -61,7 +76,22 @@ def register_device(
     "",
     response_model=DeviceListResponse,
     status_code=status.HTTP_200_OK,
+    dependencies=[
+        Depends(
+            require_roles(
+                UserRole.ADMIN,
+                UserRole.OPERATOR,
+                UserRole.VIEWER,
+            )
+        )
+    ],
     responses={
+        status.HTTP_401_UNAUTHORIZED: {
+            "model": ErrorResponse,
+        },
+        status.HTTP_403_FORBIDDEN: {
+            "model": ErrorResponse,
+        },
         status.HTTP_422_UNPROCESSABLE_CONTENT: {
             "model": ErrorResponse,
         },
@@ -83,7 +113,20 @@ def list_device_collection(
     "/{device_id}",
     response_model=DeviceRead,
     status_code=status.HTTP_200_OK,
+    dependencies=[
+        Depends(
+            require_roles(
+                UserRole.ADMIN,
+            )
+        )
+    ],
     responses={
+        status.HTTP_401_UNAUTHORIZED: {
+            "model": ErrorResponse,
+        },
+        status.HTTP_403_FORBIDDEN: {
+            "model": ErrorResponse,
+        },
         status.HTTP_404_NOT_FOUND: {
             "model": ErrorResponse,
         },
@@ -119,7 +162,22 @@ def patch_device(
 @router.get(
     "/{device_id}",
     response_model=DeviceRead,
+    dependencies=[
+        Depends(
+            require_roles(
+                UserRole.ADMIN,
+                UserRole.OPERATOR,
+                UserRole.VIEWER,
+            )
+        )
+    ],
     responses={
+        status.HTTP_401_UNAUTHORIZED: {
+            "model": ErrorResponse,
+        },
+        status.HTTP_403_FORBIDDEN: {
+            "model": ErrorResponse,
+        },
         status.HTTP_404_NOT_FOUND: {
             "model": ErrorResponse,
         },

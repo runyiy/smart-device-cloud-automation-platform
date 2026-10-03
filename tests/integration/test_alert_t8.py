@@ -10,7 +10,6 @@ import pytest
 from sqlalchemy import Engine, event, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from starlette.testclient import TestClient
 
 from app.alerts.model import Alert, AlertSeverity, AlertStatus
 from app.alerts.schema import AlertListQuery, AlertRead
@@ -26,6 +25,7 @@ from app.devices.model import Device, DeviceStatus
 from app.main import create_app
 from app.telemetry.model import Telemetry
 from tests.integration.test_devices import device_engine as device_engine
+from tests.rbac_support import admin_test_client
 
 STAMP = datetime(2026, 1, 1, tzinfo=UTC)
 ACTIONS = {"acknowledge": acknowledge_alert, "resolve": resolve_alert}
@@ -298,7 +298,7 @@ def test_http_persistence_and_inactive_parent(device_engine: Engine) -> None:
             database_url=device_engine.url.render_as_string(hide_password=False),
         )
     )
-    with TestClient(app, raise_server_exceptions=False) as client:
+    with admin_test_client(app, device_engine, raise_server_exceptions=False) as client:
         listing = client.get("/api/v1/alerts", params={"device_id": str(UUID(int=1))})
         assert listing.status_code == 200 and listing.json()["total"] == 2
         assert client.post(f"/api/v1/alerts/{target}/acknowledge").status_code == 200

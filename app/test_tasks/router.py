@@ -9,6 +9,7 @@ from starlette import status
 
 from app.api.dependencies import get_db_session
 from app.api.errors import ErrorResponse
+from app.auth.authorization import require_roles
 from app.devices.service import DeviceNotFoundError
 from app.test_tasks.schema import TestTaskCreate, TestTaskRead, TestTaskUpdate
 from app.test_tasks.service import (
@@ -19,6 +20,7 @@ from app.test_tasks.service import (
     get_test_task,
     update_test_task,
 )
+from app.users.model import UserRole
 
 router = APIRouter(prefix="/test-tasks", tags=["test-tasks"])
 
@@ -27,7 +29,21 @@ router = APIRouter(prefix="/test-tasks", tags=["test-tasks"])
     "",
     response_model=TestTaskRead,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[
+        Depends(
+            require_roles(
+                UserRole.ADMIN,
+                UserRole.OPERATOR,
+            )
+        )
+    ],
     responses={
+        status.HTTP_401_UNAUTHORIZED: {
+            "model": ErrorResponse,
+        },
+        status.HTTP_403_FORBIDDEN: {
+            "model": ErrorResponse,
+        },
         status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
         status.HTTP_409_CONFLICT: {"model": ErrorResponse},
         status.HTTP_422_UNPROCESSABLE_CONTENT: {"model": ErrorResponse},
@@ -56,7 +72,22 @@ def register_test_task(
 @router.get(
     "/{task_id}",
     response_model=TestTaskRead,
+    dependencies=[
+        Depends(
+            require_roles(
+                UserRole.ADMIN,
+                UserRole.OPERATOR,
+                UserRole.VIEWER,
+            )
+        )
+    ],
     responses={
+        status.HTTP_401_UNAUTHORIZED: {
+            "model": ErrorResponse,
+        },
+        status.HTTP_403_FORBIDDEN: {
+            "model": ErrorResponse,
+        },
         status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
         status.HTTP_422_UNPROCESSABLE_CONTENT: {"model": ErrorResponse},
     },
@@ -80,7 +111,21 @@ def read_test_task(
 @router.patch(
     "/{task_id}",
     response_model=TestTaskRead,
+    dependencies=[
+        Depends(
+            require_roles(
+                UserRole.ADMIN,
+                UserRole.OPERATOR,
+            )
+        )
+    ],
     responses={
+        status.HTTP_401_UNAUTHORIZED: {
+            "model": ErrorResponse,
+        },
+        status.HTTP_403_FORBIDDEN: {
+            "model": ErrorResponse,
+        },
         status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
         status.HTTP_409_CONFLICT: {"model": ErrorResponse},
         status.HTTP_422_UNPROCESSABLE_CONTENT: {"model": ErrorResponse},

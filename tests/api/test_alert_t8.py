@@ -11,8 +11,10 @@ from starlette.testclient import TestClient
 from app.alerts.model import AlertStatus
 from app.alerts.service import AlertNotFoundError, InvalidAlertStateError
 from app.api.dependencies import get_db_session
+from app.auth.dependencies import get_current_user
 from app.core.config import Settings
 from app.main import create_app
+from app.users.model import User, UserRole
 from tests.unit.test_alert_t8 import stored_alert
 
 
@@ -22,6 +24,8 @@ def alert_client() -> Iterator[TestClient]:
         Settings(_env_file=None, database_url="sqlite+pysqlite:///:memory:")
     )
     app.dependency_overrides[get_db_session] = lambda: MagicMock(spec=Session)
+    # This fixture isolates business HTTP mapping; RBAC tests use real tokens.
+    app.dependency_overrides[get_current_user] = lambda: User(role=UserRole.ADMIN)
     with TestClient(app, raise_server_exceptions=False) as client:
         yield client
 

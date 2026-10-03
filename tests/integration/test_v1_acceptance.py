@@ -17,6 +17,7 @@ from app.telemetry.model import Telemetry
 from app.test_tasks.model import TestTask as Task
 from app.test_tasks.model import TestTaskStatus as TaskStatus
 from tests.integration.test_devices import device_engine as device_engine
+from tests.rbac_support import admin_test_client
 
 STAMP = "2026-01-01T00:00:00Z"
 
@@ -30,7 +31,7 @@ def v1_client(device_engine: Engine) -> Iterator[TestClient]:
             database_url=device_engine.url.render_as_string(hide_password=False),
         )
     )
-    with TestClient(app, raise_server_exceptions=False) as client:
+    with admin_test_client(app, device_engine, raise_server_exceptions=False) as client:
         yield client
 
 

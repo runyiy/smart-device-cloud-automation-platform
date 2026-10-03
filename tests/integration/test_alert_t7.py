@@ -7,7 +7,6 @@ from uuid import UUID
 import pytest
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
-from starlette.testclient import TestClient
 
 from app.alerts.model import Alert, AlertSeverity, AlertStatus
 from app.alerts.service import build_threshold_alert
@@ -18,6 +17,7 @@ from app.telemetry.model import Telemetry
 from app.telemetry.service import ingest_telemetry
 from tests.integration.test_devices import device_engine as device_engine
 from tests.integration.test_telemetry_t5 import STAMP, sample, seed
+from tests.rbac_support import admin_test_client
 
 
 @pytest.mark.parametrize("old_status", list(AlertStatus))
@@ -86,7 +86,7 @@ def test_alert_insert_failure_is_atomic_and_sanitized(device_engine: Engine) -> 
         alert.message = ""  # Force an actual PostgreSQL CHECK failure at flush.
         return alert
 
-    with TestClient(app, raise_server_exceptions=False) as client:
+    with admin_test_client(app, device_engine, raise_server_exceptions=False) as client:
         with patch(
             "app.telemetry.service.build_threshold_alert", side_effect=invalid_alert
         ) as helper:
@@ -132,7 +132,7 @@ def test_http_breach_keeps_telemetry_response(
             database_url=device_engine.url.render_as_string(hide_password=False),
         )
     )
-    with TestClient(app) as client:
+    with admin_test_client(app, device_engine) as client:
         response = client.post(
             f"/api/v1/devices/{device_id}/telemetry",
             json={

@@ -4,11 +4,11 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 
 from sqlalchemy import Engine, text
-from starlette.testclient import TestClient
 
 from app.core.config import Settings
 from app.main import create_app
 from tests.integration.test_devices import device_engine as device_engine
+from tests.rbac_support import admin_test_client
 
 
 def test_registration_is_committed_and_visible_to_get(device_engine: Engine) -> None:
@@ -19,7 +19,7 @@ def test_registration_is_committed_and_visible_to_get(device_engine: Engine) -> 
             database_url=device_engine.url.render_as_string(hide_password=False),
         )
     )
-    with TestClient(app) as client:
+    with admin_test_client(app, device_engine) as client:
         created = client.post(
             "/api/v1/devices",
             json={
@@ -57,7 +57,7 @@ def test_concurrent_registration_returns_one_conflict(device_engine: Engine) -> 
         )
     )
     barrier = Barrier(2)
-    with TestClient(app) as client:
+    with admin_test_client(app, device_engine) as client:
 
         def register() -> int:
             barrier.wait(timeout=10)
