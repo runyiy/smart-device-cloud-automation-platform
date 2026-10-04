@@ -55,6 +55,7 @@ with (
     )
     assert json.loads(result.stdout) == [
         "alerts",
+        "audit_logs",
         "devices",
         "telemetry",
         "test_tasks",

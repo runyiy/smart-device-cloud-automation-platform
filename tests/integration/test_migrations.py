@@ -195,6 +195,7 @@ def test_migrations_upgrade_empty_database_to_head(
         "alerts",
         "test_tasks",
         "users",
+        "audit_logs",
     }
 
 
@@ -216,7 +217,15 @@ def test_latest_migration_downgrades_and_upgrades_again(
     command.upgrade(alembic_config, "head")
     assert read_database_state(database_url) == (
         expected_head,
-        {"alembic_version", "devices", "telemetry", "alerts", "test_tasks", "users"},
+        {
+            "alembic_version",
+            "devices",
+            "telemetry",
+            "alerts",
+            "test_tasks",
+            "users",
+            "audit_logs",
+        },
     )
     command.downgrade(alembic_config, "base")
 
@@ -237,4 +246,5 @@ def test_latest_migration_downgrades_and_upgrades_again(
         "alerts",
         "test_tasks",
         "users",
+        "audit_logs",
     }

@@ -8,6 +8,7 @@ from sqlalchemy.pool import NullPool
 
 from alembic import context
 from app.alerts import model as alert_model  # noqa: F401
+from app.audit import model as audit_model  # noqa: F401
 from app.core.config import DEFAULT_SETTINGS_FILE, get_settings
 from app.db.base import Base
 from app.devices import model as device_model  # noqa: F401
@@ -20,7 +21,7 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Register the business models and User in the shared metadata.
+# Register business, User and audit models in the shared metadata.
 target_metadata = Base.metadata
 
 

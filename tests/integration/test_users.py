@@ -38,7 +38,9 @@ INSERT = text(
 
 def test_migrated_schema_matches_user_metadata(device_engine: Engine) -> None:
     script = ScriptDirectory.from_config(Config("alembic.ini"))
-    assert script.get_heads() == [HEAD]
+    # User revision/parent stay fixed while later additive revisions advance head.
+    assert len(script.get_heads()) == 1
+    assert HEAD in {r.revision for r in script.iterate_revisions("head", PARENT)}
     revision = script.get_revision(HEAD)
     assert revision is not None and revision.down_revision == PARENT
     with device_engine.connect() as connection:
@@ -323,7 +325,7 @@ def test_users_migration_preserves_all_existing_business_data(
                 )
         device_engine.dispose()
     finally:
-        command.upgrade(config, HEAD)
+        command.upgrade(config, "head")
     with device_engine.connect() as connection:
         assert inspect(connection).has_table("users")
         assert connection.scalar(text("SELECT count(*) FROM users")) == 0
