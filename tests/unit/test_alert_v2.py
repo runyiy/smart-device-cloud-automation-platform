@@ -34,7 +34,7 @@ def test_actions_lock_and_refresh_through_same_repository_session(action: str) -
             side_effect=AlertRepository.refresh,
         ) as refresh,
     ):
-        assert operation(session, row.id) is row
+        assert operation(session, row.id, actor_id=uuid4()) is row
         get.assert_called_once()
         assert get.call_args.kwargs == {"for_update": True}
         assert get.call_args.args[0].session is session
@@ -62,7 +62,7 @@ def test_actions_clean_up_unexpected_failures(action: str, failure_at: str) -> N
     ).side_effect = error
     operation = acknowledge_alert if action == "acknowledge" else resolve_alert
     with pytest.raises(RuntimeError) as caught:
-        operation(session, row.id)
+        operation(session, row.id, actor_id=uuid4())
     assert caught.value is error
     session.rollback.assert_called_once()
     session.refresh.assert_not_called()

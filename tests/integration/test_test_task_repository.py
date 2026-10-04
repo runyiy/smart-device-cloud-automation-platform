@@ -1,7 +1,7 @@
 """V2-T3 real PostgreSQL ownership, failure and cached-state concurrency checks."""
 
 from unittest.mock import patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import Engine, func, select, text
@@ -25,6 +25,7 @@ from app.test_tasks.service import (
 )
 from tests.integration.test_devices import device_engine as device_engine
 from tests.integration.test_task_t10 import seed
+from tests.rbac_support import business_actor_id as business_actor_id
 
 
 def test_repository_visibility_and_finalization_belong_to_caller(
@@ -81,7 +82,7 @@ def test_repository_lock_lifetime_and_nonblocking_service_detail(
 
 @pytest.mark.parametrize("operation", ["create", "update"])
 def test_failure_after_real_flush_rolls_back_and_allows_session_reuse(
-    device_engine: Engine, operation: str
+    device_engine: Engine, operation: str, business_actor_id: UUID
 ) -> None:
     device_id, task_id = seed(device_engine)
     error = RuntimeError("injected after database write")
@@ -100,12 +101,17 @@ def test_failure_after_real_flush_rolls_back_and_allows_session_reuse(
         with patch.object(session, "commit", side_effect=flush_then_fail):
             with pytest.raises(RuntimeError) as caught:
                 if operation == "create":
-                    create_test_task(session, Create(device_id=device_id, name="New"))
+                    create_test_task(
+                        session,
+                        Create(device_id=device_id, name="New"),
+                        actor_id=business_actor_id,
+                    )
                 else:
                     update_test_task(
                         session,
                         task_id,
                         Update(status=State.RUNNING, summary="Must roll back"),
+                        actor_id=business_actor_id,
                     )
         assert caught.value is error
         assert not session.in_transaction()
@@ -115,13 +121,15 @@ def test_failure_after_real_flush_rolls_back_and_allows_session_reuse(
             assert stored.summary == "Original"
             assert stored.started_at is None and stored.finished_at is None
             assert observer.scalar(select(func.count()).select_from(Task)) == 1
-        updated = update_test_task(session, task_id, Update(summary="Recovered"))
+        updated = update_test_task(
+            session, task_id, Update(summary="Recovered"), actor_id=business_actor_id
+        )
         assert updated.summary == "Recovered"
 
 
 @pytest.mark.parametrize("operation", ["create", "update"])
 def test_refresh_failure_cleans_read_transaction_but_keeps_committed_write(
-    device_engine: Engine, operation: str
+    device_engine: Engine, operation: str, business_actor_id: UUID
 ) -> None:
     device_id, task_id = seed(device_engine)
     error = OperationalError("refresh", {}, RuntimeError("injected"))
@@ -136,13 +144,16 @@ def test_refresh_failure_cleans_read_transaction_but_keeps_committed_write(
             with pytest.raises(OperationalError) as caught:
                 if operation == "create":
                     create_test_task(
-                        session, Create(device_id=device_id, name="Durable")
+                        session,
+                        Create(device_id=device_id, name="Durable"),
+                        actor_id=business_actor_id,
                     )
                 else:
                     update_test_task(
                         session,
                         task_id,
                         Update(status=State.RUNNING, summary="Durable"),
+                        actor_id=business_actor_id,
                     )
         assert caught.value is error
         assert not session.in_transaction()
@@ -157,14 +168,17 @@ def test_refresh_failure_cleans_read_transaction_but_keeps_committed_write(
                 assert updated.summary == "Durable" and updated.started_at is not None
                 started = updated.started_at
                 repeated = update_test_task(
-                    session, task_id, Update(status=State.RUNNING)
+                    session,
+                    task_id,
+                    Update(status=State.RUNNING),
+                    actor_id=business_actor_id,
                 )
                 assert repeated.started_at == started
         assert get_test_task(session, task_id).id == task_id
 
 
 def test_update_rechecks_state_after_lock_when_task_was_previously_read(
-    device_engine: Engine,
+    device_engine: Engine, business_actor_id: UUID
 ) -> None:
     _, task_id = seed(device_engine, State.RUNNING)
     rejected = False
@@ -173,13 +187,19 @@ def test_update_rechecks_state_after_lock_when_task_was_previously_read(
         assert cached.status is State.RUNNING
         with Session(device_engine) as winner:
             completed = update_test_task(
-                winner, task_id, Update(status=State.PASSED, summary="Winner")
+                winner,
+                task_id,
+                Update(status=State.PASSED, summary="Winner"),
+                actor_id=business_actor_id,
             )
             finished = completed.finished_at
         # The accepted caller-owned Session/autobegin contract permits prior reads.
         try:
             update_test_task(
-                stale, task_id, Update(status=State.FAILED, summary="Must not persist")
+                stale,
+                task_id,
+                Update(status=State.FAILED, summary="Must not persist"),
+                actor_id=business_actor_id,
             )
         except InvalidTestTaskStateError:
             rejected = True
@@ -193,7 +213,7 @@ def test_update_rechecks_state_after_lock_when_task_was_previously_read(
 
 
 def test_create_rechecks_device_after_lock_when_device_was_previously_read(
-    device_engine: Engine,
+    device_engine: Engine, business_actor_id: UUID
 ) -> None:
     device_id, _ = seed(device_engine)
     rejected = False
@@ -201,10 +221,17 @@ def test_create_rechecks_device_after_lock_when_device_was_previously_read(
         cached = stale.get(Device, device_id)
         assert cached is not None and cached.status is DeviceStatus.ACTIVE
         with Session(device_engine) as winner:
-            update_device(winner, device_id, DeviceUpdate(status=DeviceStatus.INACTIVE))
+            update_device(
+                winner,
+                device_id,
+                DeviceUpdate(status=DeviceStatus.INACTIVE),
+                actor_id=business_actor_id,
+            )
         try:
             create_test_task(
-                stale, Create(device_id=device_id, name="Must not persist")
+                stale,
+                Create(device_id=device_id, name="Must not persist"),
+                actor_id=business_actor_id,
             )
         except InactiveDeviceError:
             rejected = True

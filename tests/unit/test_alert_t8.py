@@ -153,11 +153,11 @@ def test_action_matrix_and_transaction(action: str, state: AlertStatus) -> None:
     operation = acknowledge_alert if action == "acknowledge" else resolve_alert
     if action == "acknowledge" and state is AlertStatus.RESOLVED:
         with pytest.raises(InvalidAlertStateError):
-            operation(session, alert.id)
+            operation(session, alert.id, actor_id=uuid4())
         session.rollback.assert_called_once()
         session.commit.assert_not_called()
     else:
-        assert operation(session, alert.id) is alert
+        assert operation(session, alert.id, actor_id=uuid4()) is alert
         session.commit.assert_called_once()
         session.refresh.assert_called_once_with(alert)
         session.rollback.assert_not_called()
@@ -190,7 +190,7 @@ def test_missing_rolls_back(action: str) -> None:
     session.scalar.return_value = None
     operation = acknowledge_alert if action == "acknowledge" else resolve_alert
     with pytest.raises(AlertNotFoundError):
-        operation(session, uuid4())
+        operation(session, uuid4(), actor_id=uuid4())
     session.rollback.assert_called_once()
     session.commit.assert_not_called()
 
@@ -204,7 +204,7 @@ def test_database_errors_roll_back(action: str, failure_at: str) -> None:
     getattr(session, failure_at).side_effect = failure
     operation = acknowledge_alert if action == "acknowledge" else resolve_alert
     with pytest.raises(OperationalError) as caught:
-        operation(session, uuid4())
+        operation(session, uuid4(), actor_id=uuid4())
     assert caught.value is failure
     session.rollback.assert_called_once()
 
@@ -214,4 +214,7 @@ def test_future_trigger_time_is_resolution_lower_bound() -> None:
     alert = stored_alert()
     alert.triggered_at = datetime.now(UTC) + timedelta(days=1)
     session.scalar.return_value = alert
-    assert resolve_alert(session, alert.id).resolved_at == alert.triggered_at
+    assert (
+        resolve_alert(session, alert.id, actor_id=uuid4()).resolved_at
+        == alert.triggered_at
+    )

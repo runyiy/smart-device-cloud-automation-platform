@@ -29,6 +29,7 @@ from app.test_tasks.service import (
 from app.test_tasks.service import TestTaskNotFoundError as TaskNotFoundError
 from tests.integration.test_devices import device_engine as device_engine
 from tests.rbac_support import admin_test_client
+from tests.rbac_support import business_actor_id as business_actor_id
 
 STAMP = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -53,13 +54,15 @@ def seed(engine: Engine, state: State = State.PENDING) -> tuple[UUID, UUID]:
         return device.id, task.id
 
 
-def test_creation_details_and_rejection(device_engine: Engine) -> None:
+def test_creation_details_and_rejection(
+    device_engine: Engine, business_actor_id: UUID
+) -> None:
     device_id, _ = seed(device_engine)
     with Session(device_engine) as session:
         data = Create(device_id=device_id, name="Task")
-        first = create_test_task(session, data)
+        first = create_test_task(session, data, actor_id=business_actor_id)
         first_id = first.id
-        second = create_test_task(session, data)
+        second = create_test_task(session, data, actor_id=business_actor_id)
         assert first_id != second.id
         assert second.status is State.PENDING
         assert second.started_at is None and second.finished_at is None
@@ -73,14 +76,23 @@ def test_creation_details_and_rejection(device_engine: Engine) -> None:
         observer.commit()
     with Session(device_engine) as session:
         with pytest.raises(InactiveDeviceError):
-            create_test_task(session, data)
+            create_test_task(session, data, actor_id=business_actor_id)
         assert not session.in_transaction()
         with pytest.raises(DeviceNotFoundError):
-            create_test_task(session, Create(device_id=uuid4(), name="Task"))
+            create_test_task(
+                session,
+                Create(device_id=uuid4(), name="Task"),
+                actor_id=business_actor_id,
+            )
         with pytest.raises(TaskNotFoundError):
             get_test_task(session, uuid4())
         assert get_test_task(session, first_id).id == first_id
-        update_test_task(session, first_id, Update.model_validate({"summary": None}))
+        update_test_task(
+            session,
+            first_id,
+            Update.model_validate({"summary": None}),
+            actor_id=business_actor_id,
+        )
 
 
 @pytest.mark.parametrize(
@@ -99,6 +111,7 @@ def test_real_transitions_and_time_bounds(
     source: State,
     target: State,
     future: bool,
+    business_actor_id: UUID,
 ) -> None:
     _, task_id = seed(device_engine, source)
     lower_bound = datetime.now(UTC) + timedelta(days=1) if future else STAMP
@@ -112,7 +125,7 @@ def test_real_transitions_and_time_bounds(
     with Session(device_engine) as session:
         # Include summary to expose transition defects separately from validation.
         data = Update.model_validate({"status": target.value, "summary": "Done"})
-        update_test_task(session, task_id, data)
+        update_test_task(session, task_id, data, actor_id=business_actor_id)
     with Session(device_engine) as observer:
         row = observer.get(Task, task_id)
         assert row is not None and row.status is target
@@ -127,13 +140,13 @@ def test_real_transitions_and_time_bounds(
             else:
                 assert row.started_at is not None and row.finished_at >= row.started_at
         before = (row.requested_at, row.started_at, row.finished_at)
-        update_test_task(observer, task_id, data)
+        update_test_task(observer, task_id, data, actor_id=business_actor_id)
         assert (row.requested_at, row.started_at, row.finished_at) == before
 
 
 @pytest.mark.parametrize("operation", ["create", "update"])
 def test_failed_commit_and_invalid_transition_are_atomic(
-    device_engine: Engine, operation: str
+    device_engine: Engine, operation: str, business_actor_id: UUID
 ) -> None:
     device_id, task_id = seed(device_engine)
     with Session(device_engine) as session:
@@ -144,6 +157,7 @@ def test_failed_commit_and_invalid_transition_are_atomic(
                 Update.model_validate(
                     {"status": "passed", "summary": "Must not persist"}
                 ),
+                actor_id=business_actor_id,
             )
         assert not session.in_transaction()
 
@@ -155,10 +169,17 @@ def test_failed_commit_and_invalid_transition_are_atomic(
         event.listen(session, "before_flush", corrupt)
         with pytest.raises(IntegrityError):
             if operation == "create":
-                create_test_task(session, Create(device_id=device_id, name="New"))
+                create_test_task(
+                    session,
+                    Create(device_id=device_id, name="New"),
+                    actor_id=business_actor_id,
+                )
             else:
                 update_test_task(
-                    session, task_id, Update.model_validate({"summary": "New"})
+                    session,
+                    task_id,
+                    Update.model_validate({"summary": "New"}),
+                    actor_id=business_actor_id,
                 )
         assert not session.in_transaction()
     with Session(device_engine) as observer:
@@ -184,6 +205,7 @@ def test_concurrent_writes_observe_locks(
     device_engine: Engine,
     first_action: str,
     second_action: str,
+    business_actor_id: UUID,
 ) -> None:
     device_id, task_id = seed(device_engine, State.RUNNING)
     pending: list[Future[str]] = []
@@ -192,12 +214,17 @@ def test_concurrent_writes_observe_locks(
     def act(session: Session, action: str) -> str:
         try:
             if action == "create":
-                create_test_task(session, Create(device_id=device_id, name="Created"))
+                create_test_task(
+                    session,
+                    Create(device_id=device_id, name="Created"),
+                    actor_id=business_actor_id,
+                )
             elif action == "deactivate":
                 update_device(
                     session,
                     device_id,
                     DeviceUpdate.model_validate({"status": "inactive"}),
+                    actor_id=business_actor_id,
                 )
             else:
                 body = (
@@ -209,7 +236,12 @@ def test_concurrent_writes_observe_locks(
                     if action == "passed_only"
                     else {"status": action, "summary": "Original"}
                 )
-                update_test_task(session, task_id, Update.model_validate(body))
+                update_test_task(
+                    session,
+                    task_id,
+                    Update.model_validate(body),
+                    actor_id=business_actor_id,
+                )
             return "ok"
         except (InactiveDeviceError, InvalidTestTaskStateError):
             return "conflict"
@@ -280,7 +312,9 @@ def test_concurrent_writes_observe_locks(
                 assert row.summary == "Concurrent"
 
 
-def test_http_lifecycle_preserves_omitted_fields(device_engine: Engine) -> None:
+def test_http_lifecycle_preserves_omitted_fields(
+    device_engine: Engine, business_actor_id: UUID
+) -> None:
     device_id, sibling_id = seed(device_engine)
     app = create_app(
         Settings(
@@ -307,7 +341,10 @@ def test_http_lifecycle_preserves_omitted_fields(device_engine: Engine) -> None:
         assert client.get(path).json() == initial
         with Session(device_engine) as session:
             update_device(
-                session, device_id, DeviceUpdate.model_validate({"status": "inactive"})
+                session,
+                device_id,
+                DeviceUpdate.model_validate({"status": "inactive"}),
+                actor_id=business_actor_id,
             )
         running = client.patch(path, json={"status": "running"})
         assert running.status_code == 200

@@ -18,6 +18,7 @@ from app.devices.service import (
 )
 from tests.integration.test_device_t3 import seed
 from tests.integration.test_devices import device_engine as device_engine
+from tests.rbac_support import business_actor_id as business_actor_id
 
 
 def new_device(serial: str = "REPO-1") -> Device:
@@ -117,7 +118,7 @@ def test_repository_lock_lasts_until_caller_finishes(device_engine: Engine) -> N
 
 @pytest.mark.parametrize("operation", ["create", "update"])
 def test_post_commit_refresh_failure_keeps_write_and_cleans_read_transaction(
-    device_engine: Engine, operation: str
+    device_engine: Engine, operation: str, business_actor_id: UUID
 ) -> None:
     device_id = seed(device_engine)[0]
     factory = create_session_factory(device_engine)
@@ -141,9 +142,15 @@ def test_post_commit_refresh_failure_keeps_write_and_cleans_read_transaction(
                             model="M1",
                             firmware_version="v1",
                         ),
+                        actor_id=business_actor_id,
                     )
                 else:
-                    update_device(session, device_id, DeviceUpdate(name="Persisted"))
+                    update_device(
+                        session,
+                        device_id,
+                        DeviceUpdate(name="Persisted"),
+                        actor_id=business_actor_id,
+                    )
         assert caught.value is error
         assert not session.in_transaction()
         with factory() as observer:
@@ -159,7 +166,7 @@ def test_post_commit_refresh_failure_keeps_write_and_cleans_read_transaction(
 
 @pytest.mark.parametrize("operation", ["create", "update"])
 def test_unexpected_flush_failure_rolls_back_and_allows_session_reuse(
-    device_engine: Engine, operation: str
+    device_engine: Engine, operation: str, business_actor_id: UUID
 ) -> None:
     device_id = seed(device_engine)[0]
     factory = create_session_factory(device_engine)
@@ -177,9 +184,15 @@ def test_unexpected_flush_failure_rolls_back_and_allows_session_reuse(
                             model="M1",
                             firmware_version="v1",
                         ),
+                        actor_id=business_actor_id,
                     )
                 else:
-                    update_device(session, device_id, DeviceUpdate(name="Rejected"))
+                    update_device(
+                        session,
+                        device_id,
+                        DeviceUpdate(name="Rejected"),
+                        actor_id=business_actor_id,
+                    )
         assert caught.value is error
         assert not session.in_transaction(), "Failed use case left its transaction open"
         assert not session.new and not session.dirty
@@ -191,6 +204,7 @@ def test_unexpected_flush_failure_rolls_back_and_allows_session_reuse(
                 model="M1",
                 firmware_version="v1",
             ),
+            actor_id=business_actor_id,
         )
         with factory() as observer:
             row = observer.get(Device, device_id)
@@ -207,7 +221,9 @@ def test_unexpected_flush_failure_rolls_back_and_allows_session_reuse(
             )
 
 
-def test_unique_conflict_leaves_session_reusable(device_engine: Engine) -> None:
+def test_unique_conflict_leaves_session_reusable(
+    device_engine: Engine, business_actor_id: UUID
+) -> None:
     seed(device_engine)
     factory = create_session_factory(device_engine)
     with factory() as session:
@@ -220,6 +236,7 @@ def test_unique_conflict_leaves_session_reusable(device_engine: Engine) -> None:
                     model="M1",
                     firmware_version="v1",
                 ),
+                actor_id=business_actor_id,
             )
         assert not session.in_transaction()
         assert not session.new and not session.dirty
@@ -231,6 +248,7 @@ def test_unique_conflict_leaves_session_reusable(device_engine: Engine) -> None:
                 model="M1",
                 firmware_version="v1",
             ),
+            actor_id=business_actor_id,
         )
         with factory() as observer:
             assert observer.get(Device, saved.id) is not None

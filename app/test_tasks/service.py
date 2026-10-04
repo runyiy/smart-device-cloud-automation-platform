@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.audit.service import record_audit_event
 from app.db.transaction import transaction
 from app.devices.model import DeviceStatus
 from app.devices.repository import DeviceRepository
@@ -28,7 +29,12 @@ class InvalidTestTaskStateError(Exception):
     """The requested transition is outside the permitted lifecycle."""
 
 
-def create_test_task(session: Session, data: TestTaskCreate) -> TestTask:
+def create_test_task(
+    session: Session,
+    data: TestTaskCreate,
+    *,
+    actor_id: UUID,
+) -> TestTask:
     """Lock an active Device and commit one new pending task."""
     repo_device = DeviceRepository(session)
     repo_test_task = TestTaskRepository(session)
@@ -52,6 +58,20 @@ def create_test_task(session: Session, data: TestTaskCreate) -> TestTask:
             summary=data.summary,
         )
         repo_test_task.add(test_task)
+
+        # Materialize the target UUID; business and audit still share one commit.
+        session.flush()
+
+        record_audit_event(
+            session=session,
+            actor_id=actor_id,
+            action="test_task.created",
+            resource_type="test_task",
+            resource_id=test_task.id,
+            event_metadata={
+                "device_id": str(device.id),
+            },
+        )
 
     try:
         repo_test_task.refresh(test_task)
@@ -78,7 +98,13 @@ def get_test_task(session: Session, task_id: UUID) -> TestTask:
     return test_task
 
 
-def update_test_task(session: Session, task_id: UUID, data: TestTaskUpdate) -> TestTask:
+def update_test_task(
+    session: Session,
+    task_id: UUID,
+    data: TestTaskUpdate,
+    *,
+    actor_id: UUID,
+) -> TestTask:
     """Lock the task and atomically apply supplied fields and valid transitions."""
     repo_test_task = TestTaskRepository(session)
 
@@ -91,6 +117,12 @@ def update_test_task(session: Session, task_id: UUID, data: TestTaskUpdate) -> T
             )
 
         updates = data.model_dump(exclude_unset=True)
+
+        from_status = test_task.status
+
+        fields = sorted(updates.keys())
+
+        changed = any(getattr(test_task, field) != updates[field] for field in fields)
 
         if "status" in updates:
             new_status = updates["status"]
@@ -153,8 +185,24 @@ def update_test_task(session: Session, task_id: UUID, data: TestTaskUpdate) -> T
 
                 test_task.status = new_status
 
+        to_status = test_task.status
+
         if "summary" in updates:
             test_task.summary = updates["summary"]
+
+        record_audit_event(
+            session=session,
+            actor_id=actor_id,
+            action="test_task.updated",
+            resource_type="test_task",
+            resource_id=test_task.id,
+            event_metadata={
+                "fields": fields,
+                "from_status": from_status.value,
+                "to_status": to_status.value,
+                "changed": changed,
+            },
+        )
 
     try:
         repo_test_task.refresh(test_task)

@@ -135,7 +135,7 @@ def test_all_transitions(source: State, target: State) -> None:
     data = Update.model_validate({"status": target.value, "summary": "Changed"})
     if source != target and target not in ALLOWED[source]:
         with pytest.raises(InvalidTestTaskStateError):
-            update_test_task(session, row.id, data)
+            update_test_task(session, row.id, data, actor_id=uuid4())
         assert (
             row.status,
             row.requested_at,
@@ -146,7 +146,7 @@ def test_all_transitions(source: State, target: State) -> None:
         session.rollback.assert_called_once()
         session.commit.assert_not_called()
         return
-    result = update_test_task(session, row.id, data)
+    result = update_test_task(session, row.id, data, actor_id=uuid4())
     assert result.status is target
     assert result.summary == "Changed" and result.requested_at == STAMP
     if source == target:
@@ -168,7 +168,9 @@ def test_summary_only_preserves_lifecycle(state: State) -> None:
     before = (row.status, row.requested_at, row.started_at, row.finished_at)
     session = MagicMock(spec=Session)
     session.scalar.return_value = row
-    update_test_task(session, row.id, Update.model_validate({"summary": None}))
+    update_test_task(
+        session, row.id, Update.model_validate({"summary": None}), actor_id=uuid4()
+    )
     assert row.summary is None
     assert (row.status, row.requested_at, row.started_at, row.finished_at) == before
 
@@ -212,7 +214,14 @@ def test_write_rolls_back_sql_errors(operation: str, failure_at: str) -> None:
     getattr(session, failure_at).side_effect = failure
     with pytest.raises(OperationalError):
         if operation == "create":
-            create_test_task(session, Create(device_id=uuid4(), name="Task"))
+            create_test_task(
+                session, Create(device_id=uuid4(), name="Task"), actor_id=uuid4()
+            )
         else:
-            update_test_task(session, uuid4(), Update.model_validate({"summary": None}))
+            update_test_task(
+                session,
+                uuid4(),
+                Update.model_validate({"summary": None}),
+                actor_id=uuid4(),
+            )
     session.rollback.assert_called_once()

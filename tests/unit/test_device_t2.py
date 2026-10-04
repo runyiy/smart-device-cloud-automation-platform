@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
+from app.audit.model import AuditLog
 from app.devices.model import Device, DeviceStatus
 from app.devices.schema import DeviceCreate, DeviceRead
 from app.devices.service import (
@@ -135,7 +136,7 @@ def test_service_translates_only_exact_unique_violation(
     session.commit.side_effect = error
     expected = DuplicateSerialNumberError if is_duplicate else IntegrityError
     with pytest.raises(expected):
-        create_device(session, DeviceCreate.model_validate(payload()))
+        create_device(session, DeviceCreate.model_validate(payload()), actor_id=uuid4())
     session.rollback.assert_called_once()
     session.close.assert_not_called()
 
@@ -145,16 +146,30 @@ def test_service_rolls_back_and_preserves_other_database_failures() -> None:
     error = OperationalError("INSERT", {}, Exception("PRIVATE_SECRET"))
     session.commit.side_effect = error
     with pytest.raises(OperationalError) as caught:
-        create_device(session, DeviceCreate.model_validate(payload()))
+        create_device(session, DeviceCreate.model_validate(payload()), actor_id=uuid4())
     assert caught.value is error
     session.rollback.assert_called_once()
 
 
 def test_service_success_commits_once_without_closing_session() -> None:
     session = MagicMock(spec=Session)
-    device = create_device(session, DeviceCreate.model_validate(payload()))
+    actor_id = uuid4()
+
+    def materialize_id() -> None:
+        session.add.call_args_list[0].args[0].id = uuid4()
+
+    session.flush.side_effect = materialize_id
+    device = create_device(
+        session, DeviceCreate.model_validate(payload()), actor_id=actor_id
+    )
     assert device.serial_number == "SN-001"
-    session.add.assert_called_once_with(device)
+    assert session.add.call_count == 2
+    assert session.add.call_args_list[0].args == (device,)
+    audit = session.add.call_args_list[1].args[0]
+    assert isinstance(audit, AuditLog)
+    assert audit.actor_id == actor_id and audit.resource_id == device.id
+    assert audit.action == "device.created" and audit.event_metadata == {}
+    session.flush.assert_called_once_with()
     session.commit.assert_called_once()
     session.refresh.assert_called_once_with(device)
     session.close.assert_not_called()

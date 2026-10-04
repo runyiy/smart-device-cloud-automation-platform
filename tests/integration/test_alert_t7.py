@@ -18,11 +18,12 @@ from app.telemetry.service import ingest_telemetry
 from tests.integration.test_devices import device_engine as device_engine
 from tests.integration.test_telemetry_t5 import STAMP, sample, seed
 from tests.rbac_support import admin_test_client
+from tests.rbac_support import business_actor_id as business_actor_id
 
 
 @pytest.mark.parametrize("old_status", list(AlertStatus))
 def test_repeats_late_samples_and_normal_readings(
-    device_engine: Engine, old_status: AlertStatus
+    device_engine: Engine, old_status: AlertStatus, business_actor_id: UUID
 ) -> None:
     device_id = seed(device_engine)
     now = datetime.now(UTC)
@@ -42,11 +43,15 @@ def test_repeats_late_samples_and_normal_readings(
         old_id = old.id
         old_snapshot = (old.status, old.message, old.triggered_at, old.resolved_at)
         for stamp in (future, future, STAMP):
-            ingest_telemetry(session, device_id, sample(stamp, 90.0))
+            ingest_telemetry(
+                session, device_id, sample(stamp, 90.0), actor_id=business_actor_id
+            )
         # Recovery and unknown units persist without altering any existing Alert.
-        ingest_telemetry(session, device_id, sample(future, 80.0))
+        ingest_telemetry(
+            session, device_id, sample(future, 80.0), actor_id=business_actor_id
+        )
         mismatched = sample(future, 90.0).model_copy(update={"unit": "C"})
-        ingest_telemetry(session, device_id, mismatched)
+        ingest_telemetry(session, device_id, mismatched, actor_id=business_actor_id)
     with Session(device_engine) as session:
         alerts = list(session.scalars(select(Alert)).all())
         assert len(alerts) == 4 and len({a.id for a in alerts}) == 4
@@ -68,10 +73,12 @@ def test_repeats_late_samples_and_normal_readings(
         assert session.scalar(select(func.count()).select_from(Telemetry)) == 5
 
 
-def test_alert_insert_failure_is_atomic_and_sanitized(device_engine: Engine) -> None:
+def test_alert_insert_failure_is_atomic_and_sanitized(
+    device_engine: Engine, business_actor_id: UUID
+) -> None:
     device_id = seed(device_engine)
     with Session(device_engine) as session:
-        ingest_telemetry(session, device_id, sample(STAMP))
+        ingest_telemetry(session, device_id, sample(STAMP), actor_id=business_actor_id)
     app = create_app(
         Settings(
             _env_file=None,

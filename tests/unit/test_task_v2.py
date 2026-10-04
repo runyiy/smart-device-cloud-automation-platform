@@ -30,7 +30,9 @@ def test_creation_shares_session_and_delegates_staging_and_readback() -> None:
             TaskRepository, "refresh", autospec=True, side_effect=TaskRepository.refresh
         ) as refresh,
     ):
-        row = create_test_task(session, Create(device_id=device.id, name="Task"))
+        row = create_test_task(
+            session, Create(device_id=device.id, name="Task"), actor_id=uuid4()
+        )
         assert get.call_args.args[0].session is session
         assert get.call_args.args[1] == device.id
         assert get.call_args.kwargs == {"for_update": True}
@@ -61,7 +63,9 @@ def test_task_lookup_lock_and_readback_contract(operation: str) -> None:
         result = (
             get_test_task(session, row.id)
             if operation == "read"
-            else update_test_task(session, row.id, Update(summary=None))
+            else update_test_task(
+                session, row.id, Update(summary=None), actor_id=uuid4()
+            )
         )
         assert result is row
         get.assert_called_once()
@@ -95,9 +99,11 @@ def test_unexpected_write_failure_rolls_back_once_and_propagates(
     ).side_effect = error
     with pytest.raises(RuntimeError) as caught:
         if operation == "create":
-            create_test_task(session, Create(device_id=uuid4(), name="Task"))
+            create_test_task(
+                session, Create(device_id=uuid4(), name="Task"), actor_id=uuid4()
+            )
         else:
-            update_test_task(session, uuid4(), Update(summary=None))
+            update_test_task(session, uuid4(), Update(summary=None), actor_id=uuid4())
     assert caught.value is error
     session.rollback.assert_called_once()
     session.refresh.assert_not_called()

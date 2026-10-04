@@ -94,7 +94,7 @@ def test_update_rolls_back_database_errors(failure_at: str) -> None:
     error = OperationalError("UPDATE", {}, Exception("PRIVATE_SECRET"))
     getattr(session, failure_at).side_effect = error
     with pytest.raises(OperationalError) as caught:
-        update_device(session, device.id, DeviceUpdate(name="New"))
+        update_device(session, device.id, DeviceUpdate(name="New"), actor_id=uuid4())
     assert caught.value is error
     session.rollback.assert_called_once()
     session.close.assert_not_called()
@@ -104,7 +104,10 @@ def test_update_success_commits_once_and_refreshes() -> None:
     session = MagicMock(spec=Session)
     device = Device(id=uuid4(), name="Original", status="active")
     session.scalar.return_value = device
-    assert update_device(session, device.id, DeviceUpdate(name="New")) is device
+    assert (
+        update_device(session, device.id, DeviceUpdate(name="New"), actor_id=uuid4())
+        is device
+    )
     session.commit.assert_called_once()
     session.refresh.assert_called_once_with(device)
     session.rollback.assert_not_called()
@@ -118,7 +121,12 @@ def test_update_domain_rejection_rolls_back_before_mutation(missing: bool) -> No
     session.scalar.return_value = None if missing else device
     expected = DeviceNotFoundError if missing else InvalidDeviceStateError
     with pytest.raises(expected):
-        update_device(session, device.id, DeviceUpdate(name="New", status="active"))
+        update_device(
+            session,
+            device.id,
+            DeviceUpdate(name="New", status="active"),
+            actor_id=uuid4(),
+        )
     assert device.name == "Original"
     session.rollback.assert_called_once()
     session.commit.assert_not_called()

@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.audit.service import record_audit_event
 from app.db.transaction import transaction
 from app.devices.model import Device
 from app.devices.repository import DeviceRepository
@@ -19,7 +20,12 @@ class DuplicateSerialNumberError(Exception):
     """The database rejected an already registered serial number."""
 
 
-def create_device(session: Session, data: DeviceCreate) -> Device:
+def create_device(
+    session: Session,
+    data: DeviceCreate,
+    *,
+    actor_id: UUID,
+) -> Device:
     """Create through the write boundary; translate only exact serial conflicts."""
 
     device = Device(
@@ -33,6 +39,18 @@ def create_device(session: Session, data: DeviceCreate) -> Device:
     try:
         with transaction(session):
             repo.add(device)
+
+            # Materialize the target UUID before staging its atomic audit event.
+            session.flush()
+
+            record_audit_event(
+                session=session,
+                actor_id=actor_id,
+                action="device.created",
+                resource_type="device",
+                resource_id=device.id,
+                event_metadata={},
+            )
 
     except IntegrityError as exc:
         # The write boundary has already rolled back before error translation.
@@ -87,7 +105,13 @@ def list_devices(session: Session, query: DeviceListQuery) -> tuple[list[Device]
     return devices, total
 
 
-def update_device(session: Session, device_id: UUID, data: DeviceUpdate) -> Device:
+def update_device(
+    session: Session,
+    device_id: UUID,
+    data: DeviceUpdate,
+    *,
+    actor_id: UUID,
+) -> Device:
     """Lock the row, validate transitions, and atomically persist supplied fields."""
 
     repo = DeviceRepository(session)
@@ -101,6 +125,10 @@ def update_device(session: Session, device_id: UUID, data: DeviceUpdate) -> Devi
 
         updates = data.model_dump(exclude_unset=True)
 
+        fields = sorted(updates.keys())
+
+        changed = any(getattr(device, field) != updates[field] for field in fields)
+
         if "status" in updates:
             new_status = updates["status"]
 
@@ -113,6 +141,18 @@ def update_device(session: Session, device_id: UUID, data: DeviceUpdate) -> Devi
 
         if "status" in updates:
             device.status = updates["status"]
+
+        record_audit_event(
+            session=session,
+            actor_id=actor_id,
+            action="device.updated",
+            resource_type="device",
+            resource_id=device.id,
+            event_metadata={
+                "fields": fields,
+                "changed": changed,
+            },
+        )
 
     try:
         repo.refresh(device)

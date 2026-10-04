@@ -26,7 +26,7 @@ from app.devices.service import (
     list_devices,
     update_device,
 )
-from app.users.model import UserRole
+from app.users.model import User, UserRole
 
 router = APIRouter(prefix="/devices", tags=["devices"])
 
@@ -35,13 +35,6 @@ router = APIRouter(prefix="/devices", tags=["devices"])
     "",
     response_model=DeviceRead,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[
-        Depends(
-            require_roles(
-                UserRole.ADMIN,
-            )
-        )
-    ],
     responses={
         status.HTTP_401_UNAUTHORIZED: {
             "model": ErrorResponse,
@@ -60,10 +53,18 @@ router = APIRouter(prefix="/devices", tags=["devices"])
 def register_device(
     data: DeviceCreate,
     session: Annotated[Session, Depends(get_db_session)],
+    actor: Annotated[
+        User,
+        Depends(
+            require_roles(
+                UserRole.ADMIN,
+            )
+        ),
+    ],
 ) -> DeviceRead:
     """POST /api/v1/devices -> 201; map duplicate serial errors to HTTP 409."""
     try:
-        device = create_device(session=session, data=data)
+        device = create_device(session=session, data=data, actor_id=actor.id)
         return DeviceRead.model_validate(device)
 
     except DuplicateSerialNumberError as exc:
@@ -113,13 +114,6 @@ def list_device_collection(
     "/{device_id}",
     response_model=DeviceRead,
     status_code=status.HTTP_200_OK,
-    dependencies=[
-        Depends(
-            require_roles(
-                UserRole.ADMIN,
-            )
-        )
-    ],
     responses={
         status.HTTP_401_UNAUTHORIZED: {
             "model": ErrorResponse,
@@ -142,10 +136,20 @@ def patch_device(
     device_id: UUID,
     data: DeviceUpdate,
     session: Annotated[Session, Depends(get_db_session)],
+    actor: Annotated[
+        User,
+        Depends(
+            require_roles(
+                UserRole.ADMIN,
+            )
+        ),
+    ],
 ) -> DeviceRead:
     """PATCH /api/v1/devices/{device_id}; map missing/state errors to 404/409."""
     try:
-        device = update_device(session=session, device_id=device_id, data=data)
+        device = update_device(
+            session=session, device_id=device_id, data=data, actor_id=actor.id
+        )
         return DeviceRead.model_validate(device)
 
     except DeviceNotFoundError as exc:

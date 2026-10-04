@@ -29,9 +29,12 @@ def test_write_service_cleans_up_unexpected_commit_failure(operation: str) -> No
                     model="M1",
                     firmware_version="v1",
                 ),
+                actor_id=uuid4(),
             )
         else:
-            update_device(session, row.id, DeviceUpdate(name="Changed"))
+            update_device(
+                session, row.id, DeviceUpdate(name="Changed"), actor_id=uuid4()
+            )
     assert caught.value is error
     session.commit.assert_called_once()
     session.rollback.assert_called_once()
@@ -60,9 +63,12 @@ def test_write_service_delegates_readback_to_repository(operation: str) -> None:
                     model="M1",
                     firmware_version="v1",
                 ),
+                actor_id=uuid4(),
             )
         else:
-            result = update_device(session, row.id, DeviceUpdate(name="Changed"))
+            result = update_device(
+                session, row.id, DeviceUpdate(name="Changed"), actor_id=uuid4()
+            )
         refresh.assert_called_once()
         repository, refreshed = refresh.call_args.args
         assert repository.session is session

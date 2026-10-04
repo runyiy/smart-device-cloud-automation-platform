@@ -20,7 +20,7 @@ from app.test_tasks.service import (
     get_test_task,
     update_test_task,
 )
-from app.users.model import UserRole
+from app.users.model import User, UserRole
 
 router = APIRouter(prefix="/test-tasks", tags=["test-tasks"])
 
@@ -29,14 +29,6 @@ router = APIRouter(prefix="/test-tasks", tags=["test-tasks"])
     "",
     response_model=TestTaskRead,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[
-        Depends(
-            require_roles(
-                UserRole.ADMIN,
-                UserRole.OPERATOR,
-            )
-        )
-    ],
     responses={
         status.HTTP_401_UNAUTHORIZED: {
             "model": ErrorResponse,
@@ -52,10 +44,19 @@ router = APIRouter(prefix="/test-tasks", tags=["test-tasks"])
 def register_test_task(
     data: TestTaskCreate,
     session: Annotated[Session, Depends(get_db_session)],
+    actor: Annotated[
+        User,
+        Depends(
+            require_roles(
+                UserRole.ADMIN,
+                UserRole.OPERATOR,
+            )
+        ),
+    ],
 ) -> TestTaskRead:
     """Create a task with HTTP 201 and map Device eligibility failures."""
     try:
-        test_task = create_test_task(session=session, data=data)
+        test_task = create_test_task(session=session, data=data, actor_id=actor.id)
         return TestTaskRead.model_validate(test_task)
 
     except DeviceNotFoundError as exc:
@@ -111,14 +112,6 @@ def read_test_task(
 @router.patch(
     "/{task_id}",
     response_model=TestTaskRead,
-    dependencies=[
-        Depends(
-            require_roles(
-                UserRole.ADMIN,
-                UserRole.OPERATOR,
-            )
-        )
-    ],
     responses={
         status.HTTP_401_UNAUTHORIZED: {
             "model": ErrorResponse,
@@ -135,10 +128,21 @@ def patch_test_task(
     task_id: UUID,
     data: TestTaskUpdate,
     session: Annotated[Session, Depends(get_db_session)],
+    actor: Annotated[
+        User,
+        Depends(
+            require_roles(
+                UserRole.ADMIN,
+                UserRole.OPERATOR,
+            )
+        ),
+    ],
 ) -> TestTaskRead:
     """Delegate supplied task changes and map missing/conflicting states."""
     try:
-        test_task = update_test_task(session=session, task_id=task_id, data=data)
+        test_task = update_test_task(
+            session=session, task_id=task_id, data=data, actor_id=actor.id
+        )
         return TestTaskRead.model_validate(test_task)
 
     except TestTaskNotFoundError as exc:

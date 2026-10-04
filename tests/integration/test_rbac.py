@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import cast
 from unittest.mock import patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import jwt
 import pytest
@@ -13,6 +13,7 @@ from sqlalchemy import Engine, Table, select
 from sqlalchemy.orm import Session
 
 from app.alerts.model import Alert
+from app.audit.model import AuditLog
 from app.auth.security import AuthConfig, create_access_token
 from app.core.config import Settings
 from app.devices.model import Device
@@ -29,12 +30,13 @@ from tests.conftest import TEST_SIGNING_KEY
 from tests.integration.test_devices import device_engine as device_engine
 from tests.integration.test_migrations import validate_test_database
 from tests.integration.test_task_t10 import seed
+from tests.rbac_support import business_actor_id as business_actor_id
 from tests.rbac_support import legacy_admin_hash
 
 
 @pytest.fixture
 def rbac_client(
-    device_engine: Engine,
+    device_engine: Engine, business_actor_id: UUID
 ) -> Iterator[tuple[TestClient, User, dict[str, str]]]:
     device_id, task_id = seed(device_engine)
     with Session(device_engine, expire_on_commit=False) as session:
@@ -57,6 +59,7 @@ def rbac_client(
                     "recorded_at": "2026-01-01T00:00:00Z",
                 }
             ),
+            actor_id=business_actor_id,
         )
         alert_id = session.scalar(select(Alert.id))
         assert alert_id is not None
@@ -82,7 +85,8 @@ def rbac_client(
 
 def snapshot(engine: Engine) -> dict[str, list[tuple[object, ...]]]:
     tables = [
-        cast(Table, model.__table__) for model in (Device, Telemetry, Alert, Task, User)
+        cast(Table, model.__table__)
+        for model in (Device, Telemetry, Alert, Task, User, AuditLog)
     ]
     with engine.connect() as connection:
         return {

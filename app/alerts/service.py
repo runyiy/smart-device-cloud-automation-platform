@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.alerts.model import Alert, AlertSeverity, AlertStatus
 from app.alerts.repository import AlertRepository
 from app.alerts.schema import AlertListQuery
+from app.audit.service import record_audit_event
 from app.db.transaction import transaction
 
 
@@ -62,7 +63,12 @@ def list_alerts(session: Session, query: AlertListQuery) -> tuple[list[Alert], i
     return alerts, total
 
 
-def acknowledge_alert(session: Session, alert_id: UUID) -> Alert:
+def acknowledge_alert(
+    session: Session,
+    alert_id: UUID,
+    *,
+    actor_id: UUID,
+) -> Alert:
     """Lock before checking state; acknowledge idempotently or reject resolution."""
     repo_alert = AlertRepository(session)
 
@@ -72,10 +78,28 @@ def acknowledge_alert(session: Session, alert_id: UUID) -> Alert:
         if alert is None:
             raise AlertNotFoundError("Alert not found")
 
+        from_status = alert.status
+
         if alert.status == AlertStatus.OPEN:
             alert.status = AlertStatus.ACKNOWLEDGED
         elif alert.status == AlertStatus.RESOLVED:
             raise InvalidAlertStateError("Alert state is invalid")
+
+        to_status = alert.status
+        changed = from_status != to_status
+
+        record_audit_event(
+            session=session,
+            actor_id=actor_id,
+            action="alert.acknowledged",
+            resource_type="alert",
+            resource_id=alert.id,
+            event_metadata={
+                "from_status": from_status.value,
+                "to_status": to_status.value,
+                "changed": changed,
+            },
+        )
 
     try:
         repo_alert.refresh(alert)
@@ -88,7 +112,12 @@ def acknowledge_alert(session: Session, alert_id: UUID) -> Alert:
     return alert
 
 
-def resolve_alert(session: Session, alert_id: UUID) -> Alert:
+def resolve_alert(
+    session: Session,
+    alert_id: UUID,
+    *,
+    actor_id: UUID,
+) -> Alert:
     """Lock and resolve once, preserving the timestamp on repeated calls."""
     repo_alert = AlertRepository(session)
 
@@ -97,6 +126,8 @@ def resolve_alert(session: Session, alert_id: UUID) -> Alert:
 
         if alert is None:
             raise AlertNotFoundError("Alert not found")
+
+        from_status = alert.status
 
         if alert.status in (
             AlertStatus.OPEN,
@@ -109,6 +140,22 @@ def resolve_alert(session: Session, alert_id: UUID) -> Alert:
                 now_utc,
                 alert.triggered_at,
             )
+
+        to_status = alert.status
+        changed = from_status != to_status
+
+        record_audit_event(
+            session=session,
+            actor_id=actor_id,
+            action="alert.resolved",
+            resource_type="alert",
+            resource_id=alert.id,
+            event_metadata={
+                "from_status": from_status.value,
+                "to_status": to_status.value,
+                "changed": changed,
+            },
+        )
 
     try:
         repo_alert.refresh(alert)

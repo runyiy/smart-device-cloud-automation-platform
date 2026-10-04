@@ -26,6 +26,7 @@ from app.main import create_app
 from app.telemetry.model import Telemetry
 from tests.integration.test_devices import device_engine as device_engine
 from tests.rbac_support import admin_test_client
+from tests.rbac_support import business_actor_id as business_actor_id
 
 STAMP = datetime(2026, 1, 1, tzinfo=UTC)
 ACTIONS = {"acknowledge": acknowledge_alert, "resolve": resolve_alert}
@@ -130,9 +131,7 @@ def test_list_filters_count_and_stable_pagination(device_engine: Engine) -> None
 @pytest.mark.parametrize("action", list(ACTIONS))
 @pytest.mark.parametrize("state", list(AlertStatus))
 def test_persisted_transition_matrix(
-    device_engine: Engine,
-    action: str,
-    state: AlertStatus,
+    device_engine: Engine, action: str, state: AlertStatus, business_actor_id: UUID
 ) -> None:
     ids = seed(device_engine)
     target = ids[
@@ -145,10 +144,10 @@ def test_persisted_transition_matrix(
     with Session(device_engine) as session:
         if action == "acknowledge" and state is AlertStatus.RESOLVED:
             with pytest.raises(InvalidAlertStateError):
-                ACTIONS[action](session, target)
+                ACTIONS[action](session, target, actor_id=business_actor_id)
             assert not session.in_transaction()
         else:
-            ACTIONS[action](session, target)
+            ACTIONS[action](session, target, actor_id=business_actor_id)
             # Independent visibility proves persistence, not just identity-map mutation.
     with Session(device_engine) as observer:
         after = {i: snapshot(observer, i) for i in ids}
@@ -175,15 +174,14 @@ def test_persisted_transition_matrix(
 
 @pytest.mark.parametrize("action", list(ACTIONS))
 def test_missing_and_failed_write_leave_database_unchanged(
-    device_engine: Engine,
-    action: str,
+    device_engine: Engine, action: str, business_actor_id: UUID
 ) -> None:
     target = seed(device_engine)[0]
     with Session(device_engine) as session:
         before = snapshot(session, target)
     with Session(device_engine) as session:
         with pytest.raises(AlertNotFoundError):
-            ACTIONS[action](session, uuid4())
+            ACTIONS[action](session, uuid4(), actor_id=business_actor_id)
         assert not session.in_transaction()
 
         def corrupt_message(
@@ -197,13 +195,15 @@ def test_missing_and_failed_write_leave_database_unchanged(
 
         event.listen(session, "before_flush", corrupt_message)
         with pytest.raises(IntegrityError):
-            ACTIONS[action](session, target)
+            ACTIONS[action](session, target, actor_id=business_actor_id)
         assert not session.in_transaction()
     with Session(device_engine) as observer:
         assert snapshot(observer, target) == before
 
 
-def test_future_timestamp_and_repeated_resolution(device_engine: Engine) -> None:
+def test_future_timestamp_and_repeated_resolution(
+    device_engine: Engine, business_actor_id: UUID
+) -> None:
     target = seed(device_engine)[0]
     future = datetime.now(UTC) + timedelta(days=1)
     with Session(device_engine) as session:
@@ -211,9 +211,15 @@ def test_future_timestamp_and_repeated_resolution(device_engine: Engine) -> None
         assert row is not None
         row.triggered_at = future
         session.commit()
-        assert resolve_alert(session, target).resolved_at == future
+        assert (
+            resolve_alert(session, target, actor_id=business_actor_id).resolved_at
+            == future
+        )
     with Session(device_engine) as session:
-        assert resolve_alert(session, target).resolved_at == future
+        assert (
+            resolve_alert(session, target, actor_id=business_actor_id).resolved_at
+            == future
+        )
 
 
 @pytest.mark.parametrize(
@@ -228,6 +234,7 @@ def test_concurrent_actions_wait_for_target_lock(
     device_engine: Engine,
     first_action: str,
     second_action: str,
+    business_actor_id: UUID,
 ) -> None:
     target = seed(device_engine)[0]
     pending: list[Future[tuple[str, datetime | None]]] = []
@@ -236,7 +243,7 @@ def test_concurrent_actions_wait_for_target_lock(
     def compete() -> tuple[str, datetime | None]:
         with Session(device_engine) as second:
             try:
-                row = ACTIONS[second_action](second, target)
+                row = ACTIONS[second_action](second, target, actor_id=business_actor_id)
                 return "success", row.resolved_at
             except InvalidAlertStateError:
                 return "conflict", None
@@ -274,7 +281,7 @@ def test_concurrent_actions_wait_for_target_lock(
 
             event.listen(first, "before_commit", before_commit, once=True)
             try:
-                ACTIONS[first_action](first, target)
+                ACTIONS[first_action](first, target, actor_id=business_actor_id)
             finally:
                 first.rollback()
         outcome, second_resolution = pending[0].result(timeout=10)

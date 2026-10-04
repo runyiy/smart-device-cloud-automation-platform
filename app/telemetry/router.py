@@ -18,7 +18,7 @@ from app.telemetry.schema import (
     TelemetryRead,
 )
 from app.telemetry.service import InactiveDeviceError, ingest_telemetry, list_telemetry
-from app.users.model import UserRole
+from app.users.model import User, UserRole
 
 router = APIRouter(prefix="/devices/{device_id}/telemetry", tags=["telemetry"])
 
@@ -27,14 +27,6 @@ router = APIRouter(prefix="/devices/{device_id}/telemetry", tags=["telemetry"])
     "",
     response_model=TelemetryRead,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[
-        Depends(
-            require_roles(
-                UserRole.ADMIN,
-                UserRole.OPERATOR,
-            )
-        )
-    ],
     responses={
         status.HTTP_401_UNAUTHORIZED: {
             "model": ErrorResponse,
@@ -57,6 +49,15 @@ def post_telemetry(
     device_id: UUID,
     data: TelemetryCreate,
     session: Annotated[Session, Depends(get_db_session)],
+    actor: Annotated[
+        User,
+        Depends(
+            require_roles(
+                UserRole.ADMIN,
+                UserRole.OPERATOR,
+            )
+        ),
+    ],
 ) -> TelemetryRead:
     """POST collection -> 201; missing/inactive Device -> 404/409."""
     try:
@@ -64,6 +65,7 @@ def post_telemetry(
             session=session,
             device_id=device_id,
             data=data,
+            actor_id=actor.id,
         )
 
         return TelemetryRead.model_validate(telemetry)

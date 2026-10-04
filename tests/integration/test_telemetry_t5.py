@@ -22,6 +22,7 @@ from app.telemetry.schema import TelemetryCreate, TelemetryListQuery
 from app.telemetry.service import InactiveDeviceError, ingest_telemetry, list_telemetry
 from tests.integration.test_devices import device_engine as device_engine
 from tests.rbac_support import admin_test_client
+from tests.rbac_support import business_actor_id as business_actor_id
 
 STAMP = datetime(2026, 9, 26, 10, tzinfo=UTC)
 
@@ -42,13 +43,17 @@ def sample(stamp: datetime = STAMP, value: float = 23.5) -> TelemetryCreate:
     )
 
 
-def test_service_persists_duplicates_and_filters(device_engine: Engine) -> None:
+def test_service_persists_duplicates_and_filters(
+    device_engine: Engine, business_actor_id: UUID
+) -> None:
     device_id = seed(device_engine)
     other = seed(device_engine, "T5-002")
     with Session(device_engine) as session:
         for stamp in (STAMP, STAMP, STAMP - timedelta(hours=1)):
-            ingest_telemetry(session, device_id, sample(stamp))
-        ingest_telemetry(session, other, sample())
+            ingest_telemetry(
+                session, device_id, sample(stamp), actor_id=business_actor_id
+            )
+        ingest_telemetry(session, other, sample(), actor_id=business_actor_id)
         row = session.get(Device, device_id)
         assert row is not None and row.last_seen_at == STAMP
         rows, total = list_telemetry(
@@ -79,22 +84,29 @@ def test_service_persists_duplicates_and_filters(device_engine: Engine) -> None:
             session, device_id, TelemetryListQuery(metric="Temperature")
         )
         assert rows == [] and total == 0
-        update_device(session, device_id, DeviceUpdate(status="inactive"))
+        update_device(
+            session,
+            device_id,
+            DeviceUpdate(status="inactive"),
+            actor_id=business_actor_id,
+        )
         assert list_telemetry(session, device_id, TelemetryListQuery())[1] == 3
         with pytest.raises(InactiveDeviceError):
-            ingest_telemetry(session, device_id, sample())
+            ingest_telemetry(session, device_id, sample(), actor_id=business_actor_id)
         with pytest.raises(DeviceNotFoundError):
             list_telemetry(session, UUID(int=0), TelemetryListQuery())
 
 
-def test_failed_insert_rolls_back_watermark(device_engine: Engine) -> None:
+def test_failed_insert_rolls_back_watermark(
+    device_engine: Engine, business_actor_id: UUID
+) -> None:
     device_id = seed(device_engine)
     with Session(device_engine) as session:
-        ingest_telemetry(session, device_id, sample())
+        ingest_telemetry(session, device_id, sample(), actor_id=business_actor_id)
         # Deliberately bypass input validation to exercise a database failure.
         invalid = sample(STAMP + timedelta(hours=1)).model_copy(update={"metric": ""})
         with pytest.raises(IntegrityError):
-            ingest_telemetry(session, device_id, invalid)
+            ingest_telemetry(session, device_id, invalid, actor_id=business_actor_id)
     with Session(device_engine) as session:
         row = session.get(Device, device_id)
         assert row is not None and row.last_seen_at == STAMP
@@ -103,8 +115,7 @@ def test_failed_insert_rolls_back_watermark(device_engine: Engine) -> None:
 
 @pytest.mark.parametrize("breached", [False, True])
 def test_concurrent_ingestion_preserves_samples_and_max_time(
-    device_engine: Engine,
-    breached: bool,
+    device_engine: Engine, breached: bool, business_actor_id: UUID
 ) -> None:
     device_id = seed(device_engine)
     barrier = Barrier(2)
@@ -118,6 +129,7 @@ def test_concurrent_ingestion_preserves_samples_and_max_time(
                 sample(
                     STAMP + timedelta(hours=hour_offset), 90.0 if breached else 23.5
                 ),
+                actor_id=business_actor_id,
             ).id
 
     with ThreadPoolExecutor(max_workers=2) as executor:
@@ -135,7 +147,7 @@ def test_concurrent_ingestion_preserves_samples_and_max_time(
 @pytest.mark.parametrize("ingest_first", [False, True])
 @pytest.mark.parametrize("breached", [False, True])
 def test_ingestion_and_deactivation_lock_order(
-    device_engine: Engine, ingest_first: bool, breached: bool
+    device_engine: Engine, ingest_first: bool, breached: bool, business_actor_id: UUID
 ) -> None:
     device_id = seed(device_engine)
     ready = Event()
@@ -153,12 +165,20 @@ def test_ingestion_and_deactivation_lock_order(
             if is_ingest:
                 try:
                     ingest_telemetry(
-                        session, device_id, sample(value=90.0 if breached else 23.5)
+                        session,
+                        device_id,
+                        sample(value=90.0 if breached else 23.5),
+                        actor_id=business_actor_id,
                     )
                 except InactiveDeviceError:
                     return "rejected"
                 return "ingested"
-            update_device(session, device_id, DeviceUpdate(status="inactive"))
+            update_device(
+                session,
+                device_id,
+                DeviceUpdate(status="inactive"),
+                actor_id=business_actor_id,
+            )
             return "deactivated"
 
     with ThreadPoolExecutor(max_workers=2) as executor:

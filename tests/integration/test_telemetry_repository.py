@@ -22,6 +22,7 @@ from app.telemetry.schema import TelemetryListQuery
 from app.telemetry.service import ingest_telemetry, list_telemetry
 from tests.integration.test_devices import device_engine as device_engine
 from tests.integration.test_telemetry_t5 import STAMP, sample, seed
+from tests.rbac_support import business_actor_id as business_actor_id
 
 
 def test_repository_preserves_device_filters_totals_and_time_ties(
@@ -127,7 +128,7 @@ def test_two_repositories_leave_visibility_and_finalization_to_caller(
 
 @pytest.mark.parametrize("failure_at", ["threshold", "alert_add"])
 def test_flushed_ingestion_rolls_back_all_tables_and_reuses_session(
-    device_engine: Engine, failure_at: str
+    device_engine: Engine, failure_at: str, business_actor_id: UUID
 ) -> None:
     device_id = seed(device_engine)
     error = RuntimeError("after real flush")
@@ -167,7 +168,9 @@ def test_flushed_ingestion_rolls_back_all_tables_and_reuses_session(
             side_effect=fail_threshold if failure_at == "threshold" else fail_add,
         ):
             with pytest.raises(RuntimeError) as caught:
-                ingest_telemetry(session, device_id, sample(value=90))
+                ingest_telemetry(
+                    session, device_id, sample(value=90), actor_id=business_actor_id
+                )
         assert caught.value is error
         assert not session.in_transaction()
         assert not session.new and not session.dirty
@@ -176,14 +179,14 @@ def test_flushed_ingestion_rolls_back_all_tables_and_reuses_session(
             assert row is not None and row.last_seen_at is None
             for model in (Telemetry, Alert):
                 assert observer.scalar(select(func.count()).select_from(model)) == 0
-        ingest_telemetry(session, device_id, sample())
+        ingest_telemetry(session, device_id, sample(), actor_id=business_actor_id)
         with Session(device_engine) as observer:
             assert observer.scalar(select(func.count()).select_from(Telemetry)) == 1
             assert observer.scalar(select(func.count()).select_from(Alert)) == 0
 
 
 def test_ingestion_readback_failure_keeps_all_three_committed_changes(
-    device_engine: Engine,
+    device_engine: Engine, business_actor_id: UUID
 ) -> None:
     device_id = seed(device_engine)
     error = OperationalError("refresh", {}, Exception("injected"))
@@ -195,7 +198,9 @@ def test_ingestion_readback_failure_keeps_all_three_committed_changes(
 
         with patch.object(session, "refresh", side_effect=fail_refresh):
             with pytest.raises(OperationalError) as caught:
-                ingest_telemetry(session, device_id, sample(value=90))
+                ingest_telemetry(
+                    session, device_id, sample(value=90), actor_id=business_actor_id
+                )
         assert caught.value is error
         assert not session.in_transaction()
         with Session(device_engine) as observer:
@@ -215,7 +220,9 @@ def test_history_does_not_wait_for_a_device_writer(device_engine: Engine) -> Non
         assert list_telemetry(reader, device_id, TelemetryListQuery()) == ([], 0)
 
 
-def test_contending_ingestions_keep_maximum_event_time(device_engine: Engine) -> None:
+def test_contending_ingestions_keep_maximum_event_time(
+    device_engine: Engine, business_actor_id: UUID
+) -> None:
     """Force the newer report to commit first while the older report contends."""
     device_id = seed(device_engine)
     ready, release = Event(), Event()
@@ -230,11 +237,15 @@ def test_contending_ingestions_keep_maximum_event_time(device_engine: Engine) ->
                 assert release.wait(10), "Owner transaction was not released"
 
             event.listen(session, "before_commit", pause, once=True)
-            ingest_telemetry(session, device_id, sample(later, value=90))
+            ingest_telemetry(
+                session, device_id, sample(later, value=90), actor_id=business_actor_id
+            )
 
     def second_ingestion() -> None:
         with Session(device_engine) as session:
-            ingest_telemetry(session, device_id, sample(STAMP, value=90))
+            ingest_telemetry(
+                session, device_id, sample(STAMP, value=90), actor_id=business_actor_id
+            )
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         first = executor.submit(first_ingestion)

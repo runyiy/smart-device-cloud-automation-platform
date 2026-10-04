@@ -2,7 +2,9 @@
 
 from functools import lru_cache
 from typing import cast
+from uuid import UUID
 
+import pytest
 from fastapi import FastAPI
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
@@ -52,3 +54,27 @@ def admin_test_client(
         headers={"Authorization": f"Bearer {token}"},
         raise_server_exceptions=raise_server_exceptions,
     )
+
+
+@pytest.fixture
+def business_actor_id(device_engine: Engine) -> UUID:
+    """Persist one explicit actor for legacy direct-Service database tests.
+
+    This fixture uses the requesting module's guarded migrated test Engine.
+    It neither changes the caller's Session nor bypasses auth, audit or FK checks.
+    """
+    settings = Settings(
+        _env_file=None,
+        environment=Environment.TEST,
+        database_url=device_engine.url.render_as_string(hide_password=False),
+    )
+    validate_test_database(settings)
+    with Session(device_engine) as session:
+        user = User(
+            email="business-actor@example.test",
+            password_hash=legacy_admin_hash(),
+            role=UserRole.ADMIN,
+        )
+        session.add(user)
+        session.commit()
+        return user.id

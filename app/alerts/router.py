@@ -21,7 +21,7 @@ from app.alerts.service import (
 from app.api.dependencies import get_db_session
 from app.api.errors import ErrorResponse
 from app.auth.authorization import require_roles
-from app.users.model import UserRole
+from app.users.model import User, UserRole
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 
@@ -68,14 +68,6 @@ def list_alerts(
 @router.post(
     "/{alert_id}/acknowledge",
     response_model=AlertRead,
-    dependencies=[
-        Depends(
-            require_roles(
-                UserRole.ADMIN,
-                UserRole.OPERATOR,
-            )
-        )
-    ],
     responses={
         status.HTTP_401_UNAUTHORIZED: {
             "model": ErrorResponse,
@@ -97,10 +89,21 @@ def list_alerts(
 def acknowledge_alert(
     alert_id: UUID,
     session: Annotated[Session, Depends(get_db_session)],
+    actor: Annotated[
+        User,
+        Depends(
+            require_roles(
+                UserRole.ADMIN,
+                UserRole.OPERATOR,
+            )
+        ),
+    ],
 ) -> AlertRead:
     """Acknowledge an Alert and translate missing/invalid states to HTTP errors."""
     try:
-        alert = acknowledge_alert_service(session=session, alert_id=alert_id)
+        alert = acknowledge_alert_service(
+            session=session, alert_id=alert_id, actor_id=actor.id
+        )
 
         return AlertRead.model_validate(alert)
 
@@ -118,14 +121,6 @@ def acknowledge_alert(
 @router.post(
     "/{alert_id}/resolve",
     response_model=AlertRead,
-    dependencies=[
-        Depends(
-            require_roles(
-                UserRole.ADMIN,
-                UserRole.OPERATOR,
-            )
-        )
-    ],
     responses={
         status.HTTP_401_UNAUTHORIZED: {
             "model": ErrorResponse,
@@ -147,10 +142,21 @@ def acknowledge_alert(
 def resolve_alert(
     alert_id: UUID,
     session: Annotated[Session, Depends(get_db_session)],
+    actor: Annotated[
+        User,
+        Depends(
+            require_roles(
+                UserRole.ADMIN,
+                UserRole.OPERATOR,
+            )
+        ),
+    ],
 ) -> AlertRead:
     """Resolve an Alert idempotently and translate a missing target to HTTP 404."""
     try:
-        alert = resolve_alert_service(session=session, alert_id=alert_id)
+        alert = resolve_alert_service(
+            session=session, alert_id=alert_id, actor_id=actor.id
+        )
 
         return AlertRead.model_validate(alert)
 

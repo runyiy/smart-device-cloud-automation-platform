@@ -18,6 +18,7 @@ from app.alerts.service import (
 )
 from tests.integration.test_alert_t8 import seed
 from tests.integration.test_devices import device_engine as device_engine
+from tests.rbac_support import business_actor_id as business_actor_id
 
 
 def test_repository_filters_totals_ties_and_missing_targets(
@@ -73,7 +74,7 @@ def test_alert_repository_lock_ends_only_with_caller_transaction(
 
 @pytest.mark.parametrize("action", ["acknowledge", "resolve"])
 def test_action_readback_failure_preserves_durable_state_and_retry_timestamp(
-    device_engine: Engine, action: str
+    device_engine: Engine, action: str, business_actor_id: UUID
 ) -> None:
     alert_id = seed(device_engine)[0]
     operation = acknowledge_alert if action == "acknowledge" else resolve_alert
@@ -87,7 +88,7 @@ def test_action_readback_failure_preserves_durable_state_and_retry_timestamp(
 
         with patch.object(session, "refresh", side_effect=fail_refresh):
             with pytest.raises(OperationalError) as caught:
-                operation(session, alert_id)
+                operation(session, alert_id, actor_id=business_actor_id)
         assert caught.value is error
         assert not session.in_transaction()
         with Session(device_engine) as observer:
@@ -99,28 +100,28 @@ def test_action_readback_failure_preserves_durable_state_and_retry_timestamp(
                 else AlertStatus.RESOLVED
             )
             stamp = row.resolved_at
-        retried = operation(session, alert_id)
+        retried = operation(session, alert_id, actor_id=business_actor_id)
         assert retried.resolved_at == stamp
 
 
 @pytest.mark.parametrize("action", ["acknowledge", "resolve"])
 def test_cached_alert_uses_resolved_state_after_lock(
-    device_engine: Engine, action: str
+    device_engine: Engine, action: str, business_actor_id: UUID
 ) -> None:
     alert_id = seed(device_engine)[0]
     with Session(device_engine) as stale:
         cached = AlertRepository(stale).get(alert_id)
         assert cached is not None and cached.status is AlertStatus.OPEN
         with Session(device_engine) as winner:
-            completed = resolve_alert(winner, alert_id)
+            completed = resolve_alert(winner, alert_id, actor_id=business_actor_id)
             stamp = completed.resolved_at
             assert stamp is not None
         if action == "acknowledge":
             with pytest.raises(InvalidAlertStateError):
-                acknowledge_alert(stale, alert_id)
+                acknowledge_alert(stale, alert_id, actor_id=business_actor_id)
             assert not stale.in_transaction()
         else:
-            repeated = resolve_alert(stale, alert_id)
+            repeated = resolve_alert(stale, alert_id, actor_id=business_actor_id)
             assert repeated is cached and repeated.resolved_at == stamp
     with Session(device_engine) as observer:
         stored = observer.get(Alert, alert_id)

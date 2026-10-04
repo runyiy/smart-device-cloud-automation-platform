@@ -48,7 +48,9 @@ def test_ingestion_shares_session_and_locks_before_staging(breached: bool) -> No
             side_effect=TelemetryRepository.refresh,
         ) as refresh,
     ):
-        result = ingest_telemetry(session, device.id, sample(90 if breached else 23))
+        result = ingest_telemetry(
+            session, device.id, sample(90 if breached else 23), actor_id=uuid4()
+        )
         get.assert_called_once()
         assert get.call_args.args[0].session is session
         assert get.call_args.kwargs == {"for_update": True}
@@ -101,7 +103,7 @@ def test_unexpected_ingestion_failure_rolls_back_once(failure_at: str) -> None:
         threshold.side_effect = error if failure_at == "threshold" else None
         threshold.return_value = None
         with pytest.raises(RuntimeError) as caught:
-            ingest_telemetry(session, device.id, sample())
+            ingest_telemetry(session, device.id, sample(), actor_id=uuid4())
     assert caught.value is error
     session.rollback.assert_called_once()
     session.refresh.assert_not_called()

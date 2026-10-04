@@ -16,6 +16,7 @@ from app.devices.service import InvalidDeviceStateError, list_devices, update_de
 from app.main import create_app
 from tests.integration.test_devices import device_engine as device_engine
 from tests.rbac_support import admin_test_client
+from tests.rbac_support import business_actor_id as business_actor_id
 
 
 def seed(engine: Engine) -> list[UUID]:
@@ -115,7 +116,9 @@ def test_patch_persistence_states_and_atomic_rejection(device_engine: Engine) ->
 
 
 @pytest.mark.parametrize("scenario", ["disjoint", "same_field", "deactivation"])
-def test_row_lock_serializes_updates(device_engine: Engine, scenario: str) -> None:
+def test_row_lock_serializes_updates(
+    device_engine: Engine, scenario: str, business_actor_id: UUID
+) -> None:
     device_id = seed(device_engine)[0]
 
     def competing_update() -> str:
@@ -126,7 +129,12 @@ def test_row_lock_serializes_updates(device_engine: Engine, scenario: str) -> No
             elif scenario == "deactivation":
                 body = {"name": "Must not persist", "status": "active"}
             try:
-                update_device(session, device_id, DeviceUpdate.model_validate(body))
+                update_device(
+                    session,
+                    device_id,
+                    DeviceUpdate.model_validate(body),
+                    actor_id=business_actor_id,
+                )
             except InvalidDeviceStateError:
                 return "conflict"
             return "updated"
